@@ -140,7 +140,7 @@ pub type OnDataChannelHdlrFn = Box<
 pub type OnTrackHdlrFn = Box<
     dyn (FnMut(
             Option<Arc<TrackRemote>>,
-            Option<Arc<RTCRtpReceiver>>,
+            Option<Arc<RTCRtpTransceiver>>,
         ) -> Pin<Box<dyn Future<Output = ()> + Send + 'static>>)
         + Send
         + Sync,
@@ -589,7 +589,7 @@ impl RTCPeerConnection {
     async fn do_track(
         on_track_handler: Arc<ArcSwapOption<Mutex<OnTrackHdlrFn>>>,
         t: Option<Arc<TrackRemote>>,
-        r: Option<Arc<RTCRtpReceiver>>,
+        trans: Option<Arc<RTCRtpTransceiver>>,
     ) {
         log::debug!("got new track: {:?}", t);
 
@@ -597,7 +597,7 @@ impl RTCPeerConnection {
             tokio::spawn(async move {
                 if let Some(handler) = &*on_track_handler.load() {
                     let mut f = handler.lock().await;
-                    f(t, r).await;
+                    f(t, trans).await;
                 } else {
                     log::warn!("on_track unset, unable to handle incoming media streams");
                 }
