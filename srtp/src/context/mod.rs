@@ -112,6 +112,10 @@ pub struct Context {
 }
 
 impl Context {
+    pub fn index(&mut self, buf: &[u8]) -> usize {
+        self.cipher.get_rtcp_index(buf)
+    }
+
     /// CreateContext creates a new SRTP Context
     pub fn new(
         master_key: &[u8],

@@ -148,7 +148,11 @@ impl Session {
         let ssrcs = if is_rtp {
             vec![rtp::header::Header::unmarshal(&mut buf)?.ssrc]
         } else {
-            let pkts = rtcp::packet::unmarshal(&mut buf)?;
+            let index = remote_context.index(buf);
+            let pkts = rtcp::packet::unmarshal(&mut buf).map_err(|e| {
+                log::error!("unmarshal err {index:?}");
+                e
+            })?;
             destination_ssrc(&pkts)
         };
 
