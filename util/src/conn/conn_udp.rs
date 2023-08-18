@@ -1,4 +1,5 @@
 use tokio::net::UdpSocket;
+use crate::PACKETS;
 
 use super::*;
 
@@ -13,7 +14,11 @@ impl Conn for UdpSocket {
     }
 
     async fn recv_from(&self, buf: &mut [u8]) -> Result<(usize, SocketAddr)> {
-        Ok(self.recv_from(buf).await?)
+        let b = self.recv_from(buf).await?;
+
+        unsafe { PACKETS.lock().unwrap().insert(buf[..b.0].to_vec()) };
+
+        Ok(b)
     }
 
     async fn send(&self, buf: &[u8]) -> Result<usize> {

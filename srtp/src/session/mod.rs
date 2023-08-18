@@ -11,6 +11,7 @@ use bytes::Bytes;
 use tokio::sync::{mpsc, Mutex};
 use util::conn::Conn;
 use util::marshal::*;
+use util::PACKETS;
 
 use crate::config::*;
 use crate::context::*;
@@ -137,11 +138,28 @@ impl Session {
             return Err(Error::SessionEof);
         }
 
-        let decrypted = if is_rtp {
-            remote_context.decrypt_rtp(&buf[0..n])?
-        } else {
-            // log::error!("==========\nincoming\n{:?}\n\n", &buf[0..n]);
-            remote_context.decrypt_rtcp(&buf[0..n])?
+        let decrypted = {
+            let mut hashset = unsafe { PACKETS.lock().unwrap() };
+            let decrypted = if is_rtp {
+                remote_context.decrypt_rtp(&buf[0..n])?
+            } else {
+                let decrypted = remote_context.decrypt_rtcp(&buf[0..n]);
+
+                if let Err(e) = &decrypted {
+                    // log::error!("RTCP decrypt error {}, contains {}", e, hashset.contains(&buf[0..n]));
+                    // log::error!("THIS: {:?}", &buf[0..n]);
+                    log::error!("THIS: {n}");
+                    log::error!("THIS: {:?}", &buf[0..n]);
+                    log::error!("hashset: {:?}", hashset);
+                    std::process::exit(1);
+                }
+
+                decrypted?
+            };
+
+            hashset.remove(&buf[0..n]);
+
+            decrypted
         };
 
         let mut buf = &decrypted[..];

@@ -1,9 +1,11 @@
 #![warn(rust_2018_idioms)]
 #![allow(dead_code)]
 
+use std::collections::HashSet;
 use std::io;
 
 use async_trait::async_trait;
+use once_cell::sync::Lazy;
 use thiserror::Error;
 
 #[cfg(feature = "vnet")]
@@ -16,6 +18,10 @@ extern crate bitflags;
 
 pub mod fixed_big_int;
 pub mod replay_detector;
+
+pub static mut PACKETS: Lazy<std::sync::Mutex<HashSet<Vec<u8>>>> = Lazy::new(|| {
+    Default::default()
+});
 
 /// KeyingMaterialExporter to extract keying material.
 ///
