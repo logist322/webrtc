@@ -148,6 +148,7 @@ impl Unmarshal for VoIPMetricsReportBlock {
         B: Buf,
     {
         if raw_packet.remaining() < XR_HEADER_LENGTH {
+            log::error!("unmarshal VoIPMetricsReportBlock 111");
             return Err(error::Error::PacketTooShort.into());
         }
 
@@ -155,6 +156,7 @@ impl Unmarshal for VoIPMetricsReportBlock {
         let block_length = xr_header.block_length * 4;
         if block_length != VM_REPORT_BLOCK_LENGTH || raw_packet.remaining() < block_length as usize
         {
+            log::error!("unmarshal VoIPMetricsReportBlock 111");
             return Err(error::Error::PacketTooShort.into());
         }
 

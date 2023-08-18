@@ -147,6 +147,7 @@ impl Unmarshal for SourceDescriptionChunk {
          */
         let raw_packet_len = raw_packet.remaining();
         if raw_packet_len < (SDES_SOURCE_LEN + SDES_TYPE_LEN) {
+            log::error!("unmarshal SourceDescriptionChunk 111");
             return Err(Error::PacketTooShort.into());
         }
 
@@ -163,6 +164,7 @@ impl Unmarshal for SourceDescriptionChunk {
                     raw_packet.advance(padding_len);
                     return Ok(SourceDescriptionChunk { source, items });
                 } else {
+                    log::error!("unmarshal SourceDescriptionChunk 222");
                     return Err(Error::PacketTooShort.into());
                 }
             }
@@ -170,6 +172,7 @@ impl Unmarshal for SourceDescriptionChunk {
             items.push(item);
         }
 
+        log::error!("unmarshal SourceDescriptionChunk 333");
         Err(Error::PacketTooShort.into())
     }
 }
@@ -246,6 +249,7 @@ impl Unmarshal for SourceDescriptionItem {
          */
         let raw_packet_len = raw_packet.remaining();
         if raw_packet_len < SDES_TYPE_LEN {
+            log::error!("unmarshal SourceDescriptionItem 111");
             return Err(Error::PacketTooShort.into());
         }
 
@@ -258,11 +262,13 @@ impl Unmarshal for SourceDescriptionItem {
         }
 
         if raw_packet_len < (SDES_TYPE_LEN + SDES_OCTET_COUNT_LEN) {
+            log::error!("unmarshal SourceDescriptionItem 222");
             return Err(Error::PacketTooShort.into());
         }
 
         let octet_count = raw_packet.get_u8() as usize;
         if SDES_TEXT_OFFSET + octet_count > raw_packet_len {
+            log::error!("unmarshal SourceDescriptionItem 333");
             return Err(Error::PacketTooShort.into());
         }
 

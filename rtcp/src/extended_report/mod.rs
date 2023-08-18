@@ -125,6 +125,7 @@ impl Unmarshal for XRHeader {
         B: Buf,
     {
         if raw_packet.remaining() < XR_HEADER_LENGTH {
+            log::error!("unmarshal XRHeader");
             return Err(error::Error::PacketTooShort.into());
         }
 
@@ -253,6 +254,7 @@ impl Unmarshal for ExtendedReport {
     {
         let raw_packet_len = raw_packet.remaining();
         if raw_packet_len < (HEADER_LENGTH + SSRC_LENGTH) {
+            log::error!("unmarshal ExtendedReport 11111");
             return Err(error::Error::PacketTooShort.into());
         }
 
@@ -267,6 +269,7 @@ impl Unmarshal for ExtendedReport {
         let mut reports = vec![];
         while raw_packet.remaining() > 0 {
             if offset + XR_HEADER_LENGTH > raw_packet_len {
+                log::error!("unmarshal ExtendedReport 22222");
                 return Err(error::Error::PacketTooShort.into());
             }
 

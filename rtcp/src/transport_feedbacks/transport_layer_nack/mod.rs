@@ -209,12 +209,14 @@ impl Unmarshal for TransportLayerNack {
     {
         let raw_packet_len = raw_packet.remaining();
         if raw_packet_len < (HEADER_LENGTH + SSRC_LENGTH) {
+            log::error!("unmarshal TransportLayerNack 111");
             return Err(Error::PacketTooShort.into());
         }
 
         let h = Header::unmarshal(raw_packet)?;
 
         if raw_packet_len < (HEADER_LENGTH + (4 * h.length) as usize) {
+            log::error!("unmarshal TransportLayerNack 222");
             return Err(Error::PacketTooShort.into());
         }
 

@@ -255,6 +255,7 @@ impl Unmarshal for SenderReport {
          */
         let raw_packet_len = raw_packet.remaining();
         if raw_packet_len < (HEADER_LENGTH + SR_HEADER_LENGTH) {
+            log::error!("unmarshal SenderReport 111");
             return Err(Error::PacketTooShort.into());
         }
 
@@ -273,6 +274,7 @@ impl Unmarshal for SenderReport {
         let mut reports = Vec::with_capacity(header.count as usize);
         for _ in 0..header.count {
             if offset + RECEPTION_REPORT_LENGTH > raw_packet_len {
+                log::error!("unmarshal SenderReport 222");
                 return Err(Error::PacketTooShort.into());
             }
             let reception_report = ReceptionReport::unmarshal(raw_packet)?;

@@ -12,6 +12,6 @@ rust-version = "1.63.0"
 
 [dependencies]
 util = { version = "0.7.0", path = "../util", package = "webrtc-util", default-features = false, features = ["marshal"] }
-
+log = "0.4.16"
 bytes = "1"
 thiserror = "1.0"

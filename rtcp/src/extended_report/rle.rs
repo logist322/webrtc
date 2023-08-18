@@ -209,6 +209,7 @@ impl Unmarshal for RLEReportBlock {
         B: Buf,
     {
         if raw_packet.remaining() < XR_HEADER_LENGTH {
+            log::error!("unmarshal RLEReportBlock 111");
             return Err(error::Error::PacketTooShort.into());
         }
 
@@ -218,6 +219,7 @@ impl Unmarshal for RLEReportBlock {
             || (block_length - RLE_REPORT_BLOCK_MIN_LENGTH) % 2 != 0
             || raw_packet.remaining() < block_length as usize
         {
+            log::error!("unmarshal RLEReportBlock 222");
             return Err(error::Error::PacketTooShort.into());
         }
 

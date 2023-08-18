@@ -128,12 +128,14 @@ impl Unmarshal for FullIntraRequest {
     {
         let raw_packet_len = raw_packet.remaining();
         if raw_packet_len < (HEADER_LENGTH + SSRC_LENGTH) {
+            log::error!("unmarshal FullIntraRequest 111");
             return Err(Error::PacketTooShort.into());
         }
 
         let h = Header::unmarshal(raw_packet)?;
 
         if raw_packet_len < (HEADER_LENGTH + (4 * h.length) as usize) {
+            log::error!("unmarshal FullIntraRequest 222");
             return Err(Error::PacketTooShort.into());
         }
 

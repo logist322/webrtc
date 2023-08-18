@@ -94,6 +94,7 @@ impl Unmarshal for ReceiverReferenceTimeReportBlock {
         B: Buf,
     {
         if raw_packet.remaining() < XR_HEADER_LENGTH {
+            log::error!("unmarshal ReceiverReferenceTimeReportBlock 111");
             return Err(error::Error::PacketTooShort.into());
         }
 
@@ -101,6 +102,7 @@ impl Unmarshal for ReceiverReferenceTimeReportBlock {
         let block_length = xr_header.block_length * 4;
         if block_length != RRT_REPORT_BLOCK_LENGTH || raw_packet.remaining() < block_length as usize
         {
+            log::error!("unmarshal ReceiverReferenceTimeReportBlock 222");
             return Err(error::Error::PacketTooShort.into());
         }
 

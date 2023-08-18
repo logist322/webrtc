@@ -570,6 +570,7 @@ impl Unmarshal for TransportLayerCc {
     {
         let raw_packet_len = raw_packet.remaining();
         if raw_packet_len < (HEADER_LENGTH + SSRC_LENGTH) {
+            log::error!("unmarshal TransportLayerCc 111");
             return Err(Error::PacketTooShort.into());
         }
 
@@ -580,10 +581,12 @@ impl Unmarshal for TransportLayerCc {
         let total_length = 4 * (h.length + 1) as usize;
 
         if total_length < HEADER_LENGTH + PACKET_CHUNK_OFFSET {
+            log::error!("unmarshal TransportLayerCc 222");
             return Err(Error::PacketTooShort.into());
         }
 
         if raw_packet_len < total_length {
+            log::error!("unmarshal TransportLayerCc 333");
             return Err(Error::PacketTooShort.into());
         }
 
@@ -609,6 +612,7 @@ impl Unmarshal for TransportLayerCc {
         let mut processed_packet_num = 0u16;
         while processed_packet_num < packet_status_count {
             if packet_status_pos + PACKET_STATUS_CHUNK_LENGTH >= total_length {
+                log::error!("unmarshal TransportLayerCc 444");
                 return Err(Error::PacketTooShort.into());
             }
 
@@ -686,6 +690,7 @@ impl Unmarshal for TransportLayerCc {
 
         for delta in &mut recv_deltas {
             if recv_deltas_pos >= total_length {
+                log::error!("unmarshal TransportLayerCc 555");
                 return Err(Error::PacketTooShort.into());
             }
 

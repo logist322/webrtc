@@ -118,6 +118,7 @@ impl Unmarshal for RapidResynchronizationRequest {
     {
         let raw_packet_len = raw_packet.remaining();
         if raw_packet_len < (HEADER_LENGTH + (SSRC_LENGTH * 2)) {
+            log::error!("unmarshal RapidResynchronizationRequest 111");
             return Err(Error::PacketTooShort.into());
         }
 

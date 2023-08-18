@@ -162,6 +162,8 @@ impl Cipher for CipherAesCmHmacSha1 {
     }
 
     fn decrypt_rtcp(&mut self, encrypted: &[u8], srtcp_index: usize, ssrc: u32) -> Result<Bytes> {
+        // log::error!("decrypt rtcp\n{encrypted:?}\n\n\n============");
+
         let encrypted_len = encrypted.len();
         if encrypted_len < self.auth_tag_len() + SRTCP_INDEX_SIZE {
             return Err(Error::SrtcpTooSmall(
@@ -195,9 +197,15 @@ impl Cipher for CipherAesCmHmacSha1 {
         // Generate the auth tag we expect to see from the ciphertext.
         let expected_tag = &self.inner.generate_srtcp_auth_tag(cipher_text)[..self.auth_tag_len()];
 
+        let mut buf = &encrypted[..HEADER_LENGTH];
+        let header = rtcp::header::Header::unmarshal(&mut buf).unwrap();
+        // log::error!("payload type: {}, ssrc: {ssrc:?}", header.packet_type);
+        
         // See if the auth tag actually matches.
         // We use a constant time comparison to prevent timing attacks.
         if actual_tag.ct_eq(expected_tag).unwrap_u8() != 1 {
+            log::error!("\ntype: {:?}\ncount: {:?}\nssrc: {ssrc:?}\nsrtcp index: {srtcp_index:?}\nactual\n{actual_tag:?}\nexpected\n{expected_tag:?}\n\n", header.packet_type, header.count);
+
             return Err(Error::RtcpFailedToVerifyAuthTag);
         }
 

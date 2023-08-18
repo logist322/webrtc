@@ -159,12 +159,14 @@ impl Unmarshal for Goodbye {
         }
 
         if get_padding_size(raw_packet_len) != 0 {
+            log::error!("unmarshal Goodbye 111");
             return Err(Error::PacketTooShort.into());
         }
 
         let reason_offset = HEADER_LENGTH + header.count as usize * SSRC_LENGTH;
 
         if reason_offset > raw_packet_len {
+            log::error!("unmarshal Goodbye 111");
             return Err(Error::PacketTooShort.into());
         }
 
@@ -178,6 +180,7 @@ impl Unmarshal for Goodbye {
             let reason_end = reason_offset + 1 + reason_len;
 
             if reason_end > raw_packet_len {
+                log::error!("unmarshal Goodbye 111");
                 return Err(Error::PacketTooShort.into());
             }
 

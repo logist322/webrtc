@@ -122,6 +122,7 @@ impl Unmarshal for DLRRReportBlock {
         B: Buf,
     {
         if raw_packet.remaining() < XR_HEADER_LENGTH {
+            log::error!("unmarshal DLRRReportBlock 111");
             return Err(error::Error::PacketTooShort.into());
         }
 
@@ -129,6 +130,7 @@ impl Unmarshal for DLRRReportBlock {
         let block_length = xr_header.block_length * 4;
         if block_length % DLRR_REPORT_LENGTH != 0 || raw_packet.remaining() < block_length as usize
         {
+            log::error!("unmarshal DLRRReportBlock 2222");
             return Err(error::Error::PacketTooShort.into());
         }
 

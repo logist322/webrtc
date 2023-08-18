@@ -194,6 +194,8 @@ impl Cipher for CipherAesCmHmacSha1 {
     }
 
     fn decrypt_rtcp(&mut self, encrypted: &[u8], srtcp_index: usize, ssrc: u32) -> Result<Bytes> {
+        log::error!("decrypt rtcp\n{encrypted:?}\n\n\n============");
+
         let encrypted_len = encrypted.len();
 
         if encrypted_len < self.auth_tag_len() + SRTCP_INDEX_SIZE {
@@ -231,6 +233,8 @@ impl Cipher for CipherAesCmHmacSha1 {
         // See if the auth tag actually matches.
         // We use a constant time comparison to prevent timing attacks.
         if actual_tag.ct_eq(expected_tag).unwrap_u8() != 1 {
+            panic!("not actual {:?}", Error::RtcpFailedToVerifyAuthTag);
+
             return Err(Error::RtcpFailedToVerifyAuthTag);
         }
 

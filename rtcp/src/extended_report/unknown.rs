@@ -82,12 +82,14 @@ impl Unmarshal for UnknownReportBlock {
         B: Buf,
     {
         if raw_packet.remaining() < XR_HEADER_LENGTH {
+            log::error!("unmarshal UnknownReportBlock 111");
             return Err(error::Error::PacketTooShort.into());
         }
 
         let xr_header = XRHeader::unmarshal(raw_packet)?;
         let block_length = xr_header.block_length * 4;
         if raw_packet.remaining() < block_length as usize {
+            log::error!("unmarshal UnknownReportBlock 222");
             return Err(error::Error::PacketTooShort.into());
         }
 

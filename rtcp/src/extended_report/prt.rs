@@ -114,6 +114,7 @@ impl Unmarshal for PacketReceiptTimesReportBlock {
         B: Buf,
     {
         if raw_packet.remaining() < XR_HEADER_LENGTH {
+            log::error!("unmarshal PacketReceiptTimesReportBlock 111");
             return Err(error::Error::PacketTooShort.into());
         }
 
@@ -123,6 +124,7 @@ impl Unmarshal for PacketReceiptTimesReportBlock {
             || (block_length - PRT_REPORT_BLOCK_MIN_LENGTH) % 4 != 0
             || raw_packet.remaining() < block_length as usize
         {
+            log::error!("unmarshal PacketReceiptTimesReportBlock 222");
             return Err(error::Error::PacketTooShort.into());
         }
 

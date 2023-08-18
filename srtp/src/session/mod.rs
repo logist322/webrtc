@@ -97,7 +97,7 @@ impl Session {
                 tokio::select! {
                     result = incoming_stream => match result{
                         Ok(()) => {},
-                        Err(err) => log::info!("{}", err),
+                        Err(err) => log::error!("{}", err),
                     },
                     opt = close_stream => if let Some(ssrc) = opt {
                         Session::close_stream(&cloned_streams_map, ssrc).await
@@ -140,6 +140,7 @@ impl Session {
         let decrypted = if is_rtp {
             remote_context.decrypt_rtp(&buf[0..n])?
         } else {
+            // log::error!("==========\nincoming\n{:?}\n\n", &buf[0..n]);
             remote_context.decrypt_rtcp(&buf[0..n])?
         };
 

@@ -83,6 +83,7 @@ impl Unmarshal for RawPacket {
     {
         let raw_packet_len = raw_packet.remaining();
         if raw_packet_len < HEADER_LENGTH {
+            log::error!("unmarshal RawPacket 111");
             return Err(Error::PacketTooShort.into());
         }
 
