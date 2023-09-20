@@ -1,5 +1,7 @@
 use std::collections::HashSet;
 
+use thiserror::Error;
+
 use crate::algorithms::fitness_distance::SettingFitnessDistanceError;
 use crate::errors::OverconstrainedError;
 use crate::{MediaTrackSettings, SanitizedMediaTrackConstraints};
@@ -24,16 +26,11 @@ pub enum DeviceInformationExposureMode {
 }
 
 /// An error type indicating a failure of the `SelectSettings` algorithm.
-#[derive(Clone, Eq, PartialEq, Debug)]
+#[derive(Error, Clone, Eq, PartialEq, Debug)]
 pub enum SelectSettingsError {
     /// An error caused by one or more over-constrained settings.
-    Overconstrained(OverconstrainedError),
-}
-
-impl From<OverconstrainedError> for SelectSettingsError {
-    fn from(error: OverconstrainedError) -> Self {
-        Self::Overconstrained(error)
-    }
+    #[error(transparent)]
+    Overconstrained(#[from] OverconstrainedError),
 }
 
 /// This function implements steps 1-5 of the `SelectSettings` algorithm
@@ -110,7 +107,7 @@ where
     // # Important
     // Instead of return just ONE settings instance "with the smallest fitness distance, as calculated in step 3"
     // we instead return ALL settings instances "with the smallest fitness distance, as calculated in step 3"
-    // and leave tie-breaking to the User Agent in a seperate step:
+    // and leave tie-breaking to the User Agent in a separate step:
     Ok(select_optimal_candidates(candidates))
 }
 
