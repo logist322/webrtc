@@ -15,7 +15,12 @@ use crate::util::*;
 type Result<T> = std::result::Result<T, util::Error>;
 
 /// ReceiverEstimatedMaximumBitrate contains the receiver's estimated maximum bitrate.
-/// see: https://tools.ietf.org/html/draft-alvestrand-rmcat-remb-03
+///
+/// ## Specifications
+///
+/// * [draft-alvestrand-rmcat-remb-03]
+///
+/// [draft-alvestrand-rmcat-remb-03]: https://tools.ietf.org/html/draft-alvestrand-rmcat-remb-03
 #[derive(Debug, PartialEq, Default, Clone)]
 pub struct ReceiverEstimatedMaximumBitrate {
     /// SSRC of sender
@@ -85,7 +90,7 @@ impl Packet for ReceiverEstimatedMaximumBitrate {
         other
             .as_any()
             .downcast_ref::<ReceiverEstimatedMaximumBitrate>()
-            .map_or(false, |a| self == a)
+            == Some(self)
     }
 
     fn cloned(&self) -> Box<dyn Packet + Send + Sync> {

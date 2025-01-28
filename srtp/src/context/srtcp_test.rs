@@ -130,7 +130,7 @@ fn test_rtcp_lifecycle() -> Result<()> {
 
 #[test]
 fn test_rtcp_invalid_auth_tag() -> Result<()> {
-    let auth_tag_len = ProtectionProfile::Aes128CmHmacSha1_80.auth_tag_len();
+    let auth_tag_len = ProtectionProfile::Aes128CmHmacSha1_80.rtcp_auth_tag_len();
 
     let mut decrypt_context = Context::new(
         &RTCP_TEST_MASTER_KEY,
@@ -217,7 +217,7 @@ fn test_encrypt_rtcp_separation() -> Result<()> {
         None,
     )?;
 
-    let auth_tag_len = ProtectionProfile::Aes128CmHmacSha1_80.auth_tag_len();
+    let auth_tag_len = ProtectionProfile::Aes128CmHmacSha1_80.rtcp_auth_tag_len();
 
     let mut decrypt_context = Context::new(
         &RTCP_TEST_MASTER_KEY,
@@ -252,6 +252,45 @@ fn test_encrypt_rtcp_separation() -> Result<()> {
         let decrypted = decrypt_context.decrypt_rtcp(output)?;
         assert_eq!(inputs[i], decrypted);
     }
+
+    Ok(())
+}
+
+#[test]
+fn test_decrypt_invalid_srtcp() -> Result<()> {
+    let mut decrypt_context = Context::new(
+        &RTCP_TEST_MASTER_KEY,
+        &RTCP_TEST_MASTER_SALT,
+        ProtectionProfile::Aes128CmHmacSha1_80,
+        None,
+        Some(srtcp_replay_protection(10)),
+    )?;
+
+    let encrypted = Bytes::from_static(&[
+        0x8f, 0x48, 0xff, 0xff, 0xec, 0x77, 0xb0, 0x43, 0xf9, 0x04, 0x51, 0xff, 0xfb, 0xdf,
+    ]);
+    decrypt_context
+        .decrypt_rtcp(&encrypted)
+        .expect_err("Should fail");
+
+    Ok(())
+}
+
+#[test]
+fn test_encrypt_invalid_srtcp() -> Result<()> {
+    let mut encrypt_context = Context::new(
+        &RTCP_TEST_MASTER_KEY,
+        &RTCP_TEST_MASTER_SALT,
+        ProtectionProfile::Aes128CmHmacSha1_80,
+        None,
+        Some(srtcp_replay_protection(10)),
+    )?;
+
+    let decrypted = Bytes::from_static(&[0xbb, 0xbb, 0x0a, 0x2f]);
+    let err = encrypt_context
+        .encrypt_rtcp(&decrypted)
+        .expect_err("Should fail with ErrTooShortRtcp");
+    assert_eq!(err, Error::ErrTooShortRtcp);
 
     Ok(())
 }

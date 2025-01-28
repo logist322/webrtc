@@ -4,7 +4,7 @@
 </h1>
 <p align="center">
  <a href="https://github.com/webrtc-rs/webrtc/actions">
-  <img src="https://github.com/webrtc-rs/webrtc/workflows/webrtc/badge.svg?branch=master">
+  <img src="https://github.com/webrtc-rs/webrtc/workflows/cargo/badge.svg?branch=master">
  </a>
  <a href="https://codecov.io/gh/webrtc-rs/webrtc">
   <img src="https://codecov.io/gh/webrtc-rs/webrtc/branch/master/graph/badge.svg">
@@ -35,21 +35,23 @@
 <p align="center">
 <strong>Sponsored with 💖 by</strong><br>
 </p>
-<p align="center">
+<!--p align="center">
 <strong>Gold Sponsors:</strong><br>
 <a href="https://www.parity.io/" target="_blank">
 <img src="https://raw.githubusercontent.com/webrtc-rs/webrtc/master/doc/parity.png" style="height:75px;" alt="Parity Technologies">
-</a><br>
+</a><br-->
 <p align="center">
 <strong>Silver Sponsors:</strong><br>
 <a href="https://getstream.io/video/voice-calling/?utm_source=https://github.com/webrtc-rs/webrtc&utm_medium=sponsorship&utm_content=&utm_campaign=webrtcRepo_July2023_video_klmh22" target="_blank">
 <img src="https://stream-blog-v2.imgix.net/blog/wp-content/uploads/f7401112f41742c4e173c30d4f318cb8/stream_logo_white.png?h=50" alt="Stream Chat">
 </a><br>
+<a href="https://channel.io/" target="_blank">
+<img src="https://raw.githubusercontent.com/webrtc-rs/webrtc/master/doc/ChannelTalk_logo.png" alt="ChannelTalk">
+</a><br>
+<strong>Bronze Sponsors:</strong><br>
 <a href="https://kittycad.io/" target="_blank">
 <img src="https://raw.githubusercontent.com/webrtc-rs/webrtc/master/doc/KittyCAD.png" alt="KittyCAD">
 </a><br>
-<strong>Bronze Sponsors:</strong><br>
-<a href="https://www.embark-studios.com/" target="_blank"><img src="https://raw.githubusercontent.com/webrtc-rs/webrtc/master/doc/embark.jpg" alt="embark"></a><br>
 <a href="https://github.com/AdrianEddy" target="_blank">AdrianEddy</a><br>
 </p>
 
@@ -135,6 +137,29 @@ To build webrtc crate:
 cargo build [or clippy or test or fmt]
 ```
 
+### Devbox
+
+This repo now supports [devbox](https://www.jetify.com/devspace) for a better development experience.
+In short, devbox allows to define a development environment by modifying the `PATH` variable in your shell.
+It is based on nix and runs on Linux, MacOS, and WSL.
+To use devbox, install it from [devbox installation](https://www.jetify.com/docs/devbox/installing_devbox/):
+
+```bash
+curl -fsSL https://get.jetify.com/devbox | bash
+```
+
+Now you can either use the different devbox scripts:
+
+- test it: `devbox run test`
+- build it: `devbox run build`
+- format it: `devbux run format`
+
+Or you can enter a shell with everything pre-installed:
+
+```bash
+devbox shell
+```
+
 ## Open Source License
 
 Dual licensing under both MIT and Apache-2.0 is the currently accepted standard by the Rust language community and has been used for both the compiler and many public libraries since (see <https://doc.rust-lang.org/1.6.0/complement-project-faq.html#why-dual-mitasl2-license>). In order to match the community standards, webrtc-rs is using the dual MIT+Apache-2.0 license.
@@ -142,3 +167,11 @@ Dual licensing under both MIT and Apache-2.0 is the currently accepted standard 
 ## Contributing
 
 Contributors or Pull Requests are Welcome!!!
+
+If you want to contribute, please be sure to install the pre-commit hooks:
+
+```bash
+pre-commit install
+```
+
+Or use the devbox environment described above, which will do so automatically.

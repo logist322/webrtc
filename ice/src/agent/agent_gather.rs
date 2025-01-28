@@ -34,6 +34,7 @@ pub(crate) struct GatherCandidatesInternalParams {
     pub(crate) agent_internal: Arc<AgentInternal>,
     pub(crate) gathering_state: Arc<AtomicU8>,
     pub(crate) chan_candidate_tx: ChanCandidateTx,
+    pub(crate) include_loopback: bool,
 }
 
 struct GatherCandidatesLocalParams {
@@ -46,6 +47,7 @@ struct GatherCandidatesLocalParams {
     ext_ip_mapper: Arc<Option<ExternalIpMapper>>,
     net: Arc<Net>,
     agent_internal: Arc<AgentInternal>,
+    include_loopback: bool,
 }
 
 struct GatherCandidatesLocalUDPMuxParams {
@@ -56,6 +58,7 @@ struct GatherCandidatesLocalUDPMuxParams {
     net: Arc<Net>,
     agent_internal: Arc<AgentInternal>,
     udp_mux: Arc<dyn UDPMux + Send + Sync>,
+    include_loopback: bool,
 }
 
 struct GatherCandidatesSrflxMappedParasm {
@@ -100,6 +103,7 @@ impl Agent {
                         ext_ip_mapper: Arc::clone(&params.ext_ip_mapper),
                         net: Arc::clone(&params.net),
                         agent_internal: Arc::clone(&params.agent_internal),
+                        include_loopback: params.include_loopback,
                     };
 
                     let w = wg.worker();
@@ -203,6 +207,7 @@ impl Agent {
             ext_ip_mapper,
             net,
             agent_internal,
+            include_loopback,
         } = params;
 
         // If we wanna use UDP mux, do so
@@ -216,6 +221,7 @@ impl Agent {
                 net,
                 agent_internal,
                 udp_mux,
+                include_loopback,
             })
             .await;
 
@@ -226,7 +232,14 @@ impl Agent {
             return;
         }
 
-        let ips = local_interfaces(&net, &interface_filter, &ip_filter, &network_types).await;
+        let ips = local_interfaces(
+            &net,
+            &interface_filter,
+            &ip_filter,
+            &network_types,
+            include_loopback,
+        )
+        .await;
         for ip in ips {
             let mut mapped_ip = ip;
 
@@ -380,6 +393,7 @@ impl Agent {
             net,
             agent_internal,
             udp_mux,
+            include_loopback,
         } = params;
 
         // Filter out non UDP network types
@@ -388,11 +402,16 @@ impl Agent {
 
         let udp_mux = Arc::clone(&udp_mux);
 
-        // There's actually only one, but `local_interfaces` requires a slice.
-        let local_ips =
-            local_interfaces(&net, &interface_filter, &ip_filter, &relevant_network_types).await;
+        let local_ips = local_interfaces(
+            &net,
+            &interface_filter,
+            &ip_filter,
+            &relevant_network_types,
+            include_loopback,
+        )
+        .await;
 
-        let candidate_ip = ext_ip_mapper
+        let candidate_ips: Vec<std::net::IpAddr> = ext_ip_mapper
             .as_ref() // Arc
             .as_ref() // Option
             .and_then(|mapper| {
@@ -400,26 +419,28 @@ impl Agent {
                     return None;
                 }
 
-                local_ips
-                    .iter()
-                    .find_map(|ip| match mapper.find_external_ip(&ip.to_string()) {
-                        Ok(ip) => Some(ip),
-                        Err(err) => {
-                            log::warn!(
+                Some(
+                    local_ips
+                        .iter()
+                        .filter_map(|ip| match mapper.find_external_ip(&ip.to_string()) {
+                            Ok(ip) => Some(ip),
+                            Err(err) => {
+                                log::warn!(
                             "1:1 NAT mapping is enabled but not external IP is found for {}: {}",
                             ip,
                             err
                         );
-                            None
-                        }
-                    })
+                                None
+                            }
+                        })
+                        .collect(),
+                )
             })
-            .or_else(|| local_ips.iter().copied().next());
+            .unwrap_or_else(|| local_ips.iter().copied().collect());
 
-        let candidate_ip = match candidate_ip {
-            None => return Err(Error::ErrCandidateIpNotFound),
-            Some(ip) => ip,
-        };
+        if candidate_ips.is_empty() {
+            return Err(Error::ErrCandidateIpNotFound);
+        }
 
         let ufrag = {
             let ufrag_pwd = agent_internal.ufrag_pwd.lock().await;
@@ -430,22 +451,24 @@ impl Agent {
         let conn = udp_mux.get_conn(&ufrag).await?;
         let port = conn.local_addr()?.port();
 
-        let host_config = CandidateHostConfig {
-            base_config: CandidateBaseConfig {
-                network: UDP.to_owned(),
-                address: candidate_ip.to_string(),
-                port,
-                conn: Some(conn),
-                component: COMPONENT_RTP,
-                ..Default::default()
-            },
-            tcp_type: TcpType::Unspecified,
-        };
+        for candidate_ip in candidate_ips {
+            let host_config = CandidateHostConfig {
+                base_config: CandidateBaseConfig {
+                    network: UDP.to_owned(),
+                    address: candidate_ip.to_string(),
+                    port,
+                    conn: Some(conn.clone()),
+                    component: COMPONENT_RTP,
+                    ..Default::default()
+                },
+                tcp_type: TcpType::Unspecified,
+            };
 
-        let candidate: Arc<dyn Candidate + Send + Sync> =
-            Arc::new(host_config.new_candidate_host()?);
+            let candidate: Arc<dyn Candidate + Send + Sync> =
+                Arc::new(host_config.new_candidate_host()?);
 
-        agent_internal.add_candidate(&candidate).await?;
+            agent_internal.add_candidate(&candidate).await?;
+        }
 
         Ok(())
     }
@@ -817,8 +840,8 @@ impl Agent {
                     return Ok(());
                 }
 
-                let relay_conn = match client.allocate().await {
-                    Ok(conn) => conn,
+                let relay_conn: Arc<dyn Conn + Send + Sync> = match client.allocate().await {
+                    Ok(conn) => Arc::new(conn),
                     Err(err) => {
                         let _ = client.close().await;
                         log::warn!(
@@ -838,7 +861,7 @@ impl Agent {
                         address: raddr.ip().to_string(),
                         port: raddr.port(),
                         component: COMPONENT_RTP,
-                        conn: Some(Arc::new(relay_conn)),
+                        conn: Some(Arc::clone(&relay_conn)),
                         ..CandidateBaseConfig::default()
                     },
                     rel_addr,
@@ -850,6 +873,7 @@ impl Agent {
                     match relay_config.new_candidate_relay() {
                         Ok(candidate) => Arc::new(candidate),
                         Err(err) => {
+                            let _ = relay_conn.close().await;
                             let _ = client.close().await;
                             log::warn!(
                                 "[{}]: Failed to create relay candidate: {} {}: {}",

@@ -3,9 +3,10 @@ mod media_engine_test;
 
 use std::collections::HashMap;
 use std::ops::Range;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use portable_atomic::AtomicBool;
 use sdp::description::session::SessionDescription;
 use util::sync::Mutex as SyncMutex;
 
@@ -27,6 +28,9 @@ use crate::stats::StatsReportType::Codec;
 /// MIME_TYPE_H264 H264 MIME type.
 /// Note: Matching should be case insensitive.
 pub const MIME_TYPE_H264: &str = "video/H264";
+/// MIME_TYPE_HEVC HEVC MIME type.
+/// Note: Matching should be case insensitive.
+pub const MIME_TYPE_HEVC: &str = "video/HEVC";
 /// MIME_TYPE_OPUS Opus MIME type
 /// Note: Matching should be case insensitive.
 pub const MIME_TYPE_OPUS: &str = "audio/opus";
@@ -285,9 +289,20 @@ impl MediaEngine {
                     clock_rate: 90000,
                     channels: 0,
                     sdp_fmtp_line: "profile-id=0".to_owned(),
-                    rtcp_feedback: video_rtcp_feedback,
+                    rtcp_feedback: video_rtcp_feedback.clone(),
                 },
                 payload_type: 41,
+                ..Default::default()
+            },
+            RTCRtpCodecParameters {
+                capability: RTCRtpCodecCapability {
+                    mime_type: MIME_TYPE_HEVC.to_owned(),
+                    clock_rate: 90000,
+                    channels: 0,
+                    sdp_fmtp_line: "".to_owned(),
+                    rtcp_feedback: video_rtcp_feedback,
+                },
+                payload_type: 126,
                 ..Default::default()
             },
             RTCRtpCodecParameters {
@@ -349,7 +364,7 @@ impl MediaEngine {
     }
 
     /// Adds a header extension to the MediaEngine
-    /// To determine the negotiated value use [`get_header_extension_id`] after signaling is complete.
+    /// To determine the negotiated value use [`MediaEngine::get_header_extension_id`] after signaling is complete.
     ///
     /// The `allowed_direction` controls for which transceiver directions the extension matches. If
     /// set to `None` it matches all directions. The `SendRecv` direction would match all transceiver
@@ -417,7 +432,7 @@ impl MediaEngine {
 
     /// get_header_extension_id returns the negotiated ID for a header extension.
     /// If the Header Extension isn't enabled ok will be false
-    pub(crate) async fn get_header_extension_id(
+    pub async fn get_header_extension_id(
         &self,
         extension: RTCRtpHeaderExtensionCapability,
     ) -> (isize, bool, bool) {
@@ -450,7 +465,7 @@ impl MediaEngine {
         &self,
         payload_type: PayloadType,
     ) -> Result<(RTCRtpCodecParameters, RTPCodecType)> {
-        {
+        if self.negotiated_video.load(Ordering::SeqCst) {
             let negotiated_video_codecs = self.negotiated_video_codecs.lock();
             for codec in &*negotiated_video_codecs {
                 if codec.payload_type == payload_type {
@@ -458,9 +473,23 @@ impl MediaEngine {
                 }
             }
         }
-        {
+        if self.negotiated_audio.load(Ordering::SeqCst) {
             let negotiated_audio_codecs = self.negotiated_audio_codecs.lock();
             for codec in &*negotiated_audio_codecs {
+                if codec.payload_type == payload_type {
+                    return Ok((codec.clone(), RTPCodecType::Audio));
+                }
+            }
+        }
+        if !self.negotiated_video.load(Ordering::SeqCst) {
+            for codec in &self.video_codecs {
+                if codec.payload_type == payload_type {
+                    return Ok((codec.clone(), RTPCodecType::Video));
+                }
+            }
+        }
+        if !self.negotiated_audio.load(Ordering::SeqCst) {
+            for codec in &self.audio_codecs {
                 if codec.payload_type == payload_type {
                     return Ok((codec.clone(), RTPCodecType::Audio));
                 }
@@ -506,9 +535,11 @@ impl MediaEngine {
             let payload_type = apt.parse::<u8>()?;
 
             let mut apt_match = CodecMatch::None;
+            let mut apt_codec = None;
             for codec in exact_matches {
                 if codec.payload_type == payload_type {
                     apt_match = CodecMatch::Exact;
+                    apt_codec = Some(codec);
                     break;
                 }
             }
@@ -517,6 +548,7 @@ impl MediaEngine {
                 for codec in partial_matches {
                     if codec.payload_type == payload_type {
                         apt_match = CodecMatch::Partial;
+                        apt_codec = Some(codec);
                         break;
                     }
                 }
@@ -526,8 +558,22 @@ impl MediaEngine {
                 return Ok(CodecMatch::None); // not an error, we just ignore this codec we don't support
             }
 
+            // replace the apt value with the original codec's payload type
+            let mut to_match_codec = remote_codec.clone();
+            if let Some(apt_codec) = apt_codec {
+                let (apt_matched, mt) = codec_parameters_fuzzy_search(apt_codec, codecs);
+                if mt == apt_match {
+                    to_match_codec.capability.sdp_fmtp_line =
+                        to_match_codec.capability.sdp_fmtp_line.replacen(
+                            &format!("apt={payload_type}"),
+                            &format!("apt={}", apt_matched.payload_type),
+                            1,
+                        );
+                }
+            }
+
             // if apt's media codec is partial match, then apt codec must be partial match too
-            let (_, mut match_type) = codec_parameters_fuzzy_search(remote_codec, codecs);
+            let (_, mut match_type) = codec_parameters_fuzzy_search(&to_match_codec, codecs);
             if match_type == CodecMatch::Exact && apt_match == CodecMatch::Partial {
                 match_type = CodecMatch::Partial;
             }
@@ -546,7 +592,7 @@ impl MediaEngine {
         typ: RTPCodecType,
     ) -> Result<()> {
         let mut negotiated_header_extensions = self.negotiated_header_extensions.lock();
-        let mut propsed_header_extensions = self.proposed_header_extensions.lock();
+        let mut proposed_header_extensions = self.proposed_header_extensions.lock();
 
         for local_extension in &self.header_extensions {
             if local_extension.uri != extension {
@@ -584,7 +630,7 @@ impl MediaEngine {
             }
 
             // Clear any proposals we had for this id
-            propsed_header_extensions.remove(&id);
+            proposed_header_extensions.remove(&id);
         }
         Ok(())
     }

@@ -84,7 +84,7 @@ async fn test_session_srtcp_accept() -> Result<()> {
     let test_payload = rtcp_packet.marshal()?;
     sa.write_rtcp(&rtcp_packet).await?;
 
-    let read_stream = sb.accept().await?;
+    let (read_stream, _) = sb.accept().await?;
     let ssrc = read_stream.get_ssrc();
     assert_eq!(
         ssrc, TEST_SSRC,
@@ -153,7 +153,7 @@ fn encrypt_srtcp(
 const PLI_PACKET_SIZE: usize = 8;
 
 async fn get_sender_ssrc(read_stream: &Arc<Stream>) -> Result<u32> {
-    let auth_tag_size = ProtectionProfile::Aes128CmHmacSha1_80.auth_tag_len();
+    let auth_tag_size = ProtectionProfile::Aes128CmHmacSha1_80.rtcp_auth_tag_len();
 
     let mut read_buffer = BytesMut::with_capacity(PLI_PACKET_SIZE + auth_tag_size);
     read_buffer.resize(PLI_PACKET_SIZE + auth_tag_size, 0u8);

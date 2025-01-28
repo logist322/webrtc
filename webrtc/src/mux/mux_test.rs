@@ -1,30 +1,15 @@
 use std::io;
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::Ordering;
 
 use async_trait::async_trait;
+use portable_atomic::AtomicUsize;
 use util::conn::conn_pipe::pipe;
 
 use super::*;
-use crate::mux::mux_func::match_all;
+use crate::mux::mux_func::{match_all, match_srtp};
 
 const TEST_PIPE_BUFFER_SIZE: usize = 8192;
-
-async fn pipe_memory() -> (Arc<Endpoint>, impl Conn) {
-    // In memory pipe
-    let (ca, cb) = pipe();
-
-    let mut m = Mux::new(Config {
-        conn: Arc::new(ca),
-        buffer_size: TEST_PIPE_BUFFER_SIZE,
-    });
-
-    let e = m.new_endpoint(Box::new(match_all)).await;
-    m.remove_endpoint(&e).await;
-    let e = m.new_endpoint(Box::new(match_all)).await;
-
-    (e, cb)
-}
 
 #[tokio::test]
 async fn test_no_endpoints() -> crate::error::Result<()> {
@@ -93,6 +78,10 @@ impl Conn for MuxErrorConn {
     async fn close(&self) -> Result<()> {
         Ok(())
     }
+
+    fn as_any(&self) -> &(dyn std::any::Any + Send + Sync) {
+        self
+    }
 }
 
 #[tokio::test]
@@ -124,6 +113,28 @@ async fn test_non_fatal_read() -> Result<()> {
 
     let n = e.recv(&mut buff).await?;
     assert_eq!(&buff[..n], expected_data);
+
+    m.close().await;
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_non_fatal_dispatch() -> Result<()> {
+    let (ca, cb) = pipe();
+
+    let mut m = Mux::new(Config {
+        conn: Arc::new(ca),
+        buffer_size: TEST_PIPE_BUFFER_SIZE,
+    });
+
+    let e = m.new_endpoint(Box::new(match_srtp)).await;
+    e.buffer.set_limit_size(1).await;
+
+    for _ in 0..25 {
+        let srtp_packet = [128, 1, 2, 3, 4].to_vec();
+        cb.send(&srtp_packet).await?;
+    }
 
     m.close().await;
 

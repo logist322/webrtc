@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, AtomicU64};
+use portable_atomic::{AtomicBool, AtomicU64};
 
 use arc_swap::ArcSwapOption;
 use util::sync::Mutex as SyncMutex;
@@ -541,7 +541,7 @@ impl AgentInternal {
         {
             let local_candidates = self.local_candidates.lock().await;
             if let Some(cands) = local_candidates.get(&network_type) {
-                local_cands = cands.clone();
+                local_cands.clone_from(cands);
             }
         }
 
@@ -593,7 +593,7 @@ impl AgentInternal {
         {
             let remote_candidates = self.remote_candidates.lock().await;
             if let Some(cands) = remote_candidates.get(&network_type) {
-                remote_cands = cands.clone();
+                remote_cands.clone_from(cands);
             }
         }
 
@@ -984,7 +984,7 @@ impl AgentInternal {
     ) -> bool {
         self.find_remote_candidate(local.network_type(), remote)
             .await
-            .map_or(false, |remote_candidate| {
+            .is_some_and(|remote_candidate| {
                 remote_candidate.seen(false);
                 true
             })

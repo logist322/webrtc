@@ -27,12 +27,18 @@ use crate::error::Result;
 ///>                                    aeadAuthTagLen=16
 ///
 ///See https://tools.ietf.org/html/rfc7714 for the full specifications.
-
+///
 /// Cipher represents a implementation of one
 /// of the SRTP Specific ciphers.
 pub(crate) trait Cipher {
-    /// Get authenticated tag length.
-    fn auth_tag_len(&self) -> usize;
+    /// Get RTP authenticated tag length.
+    fn rtp_auth_tag_len(&self) -> usize;
+
+    /// Get RTCP authenticated tag length.
+    fn rtcp_auth_tag_len(&self) -> usize;
+
+    /// Get AEAD auth key length of the cipher.
+    fn aead_auth_tag_len(&self) -> usize;
 
     /// Retrieved RTCP index.
     fn get_rtcp_index(&self, input: &[u8]) -> usize;

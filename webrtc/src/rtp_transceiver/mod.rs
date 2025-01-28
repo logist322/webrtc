@@ -4,16 +4,16 @@ mod rtp_transceiver_test;
 use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
-use interceptor::stream_info::{RTPHeaderExtension, StreamInfo};
+use interceptor::stream_info::{AssociatedStreamInfo, RTPHeaderExtension, StreamInfo};
 use interceptor::Attributes;
 use log::trace;
+use portable_atomic::{AtomicBool, AtomicU8};
 use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 use tokio::sync::{Mutex, OnceCell};
-use util::Unmarshal;
 
 use crate::api::media_engine::MediaEngine;
 use crate::error::{Error, Result};
@@ -135,6 +135,7 @@ pub(crate) fn create_stream_info(
     payload_type: PayloadType,
     codec: RTCRtpCodecCapability,
     webrtc_header_extensions: &[RTCRtpHeaderExtensionParameters],
+    associated_stream: Option<AssociatedStreamInfo>,
 ) -> StreamInfo {
     let header_extensions: Vec<RTPHeaderExtension> = webrtc_header_extensions
         .iter()
@@ -164,6 +165,7 @@ pub(crate) fn create_stream_info(
         channels: codec.channels,
         sdp_fmtp_line: codec.sdp_fmtp_line,
         rtcp_feedback: feedbacks,
+        associated_stream,
     }
 }
 
@@ -301,7 +303,7 @@ impl RTCRtpTransceiver {
 
     /// mid gets the Transceiver's mid value. When not already set, this value will be set in CreateOffer or create_answer.
     pub fn mid(&self) -> Option<SmolStr> {
-        self.mid.get().map(Clone::clone)
+        self.mid.get().cloned()
     }
 
     /// kind returns RTPTransceiver's kind.
@@ -519,42 +521,4 @@ pub(crate) async fn satisfy_type_and_direction(
     }
 
     None
-}
-
-/// handle_unknown_rtp_packet consumes a single RTP Packet and returns information that is helpful
-/// for demuxing and handling an unknown SSRC (usually for Simulcast)
-pub(crate) fn handle_unknown_rtp_packet(
-    buf: &[u8],
-    mid_extension_id: u8,
-    sid_extension_id: u8,
-    rsid_extension_id: u8,
-) -> Result<(String, String, String, PayloadType)> {
-    let mut reader = buf;
-    let rp = rtp::packet::Packet::unmarshal(&mut reader)?;
-
-    if !rp.header.extension {
-        return Ok((String::new(), String::new(), String::new(), 0));
-    }
-
-    let payload_type = rp.header.payload_type;
-
-    let mid = if let Some(payload) = rp.header.get_extension(mid_extension_id) {
-        String::from_utf8(payload.to_vec())?
-    } else {
-        String::new()
-    };
-
-    let rid = if let Some(payload) = rp.header.get_extension(sid_extension_id) {
-        String::from_utf8(payload.to_vec())?
-    } else {
-        String::new()
-    };
-
-    let srid = if let Some(payload) = rp.header.get_extension(rsid_extension_id) {
-        String::from_utf8(payload.to_vec())?
-    } else {
-        String::new()
-    };
-
-    Ok((mid, rid, srid, payload_type))
 }

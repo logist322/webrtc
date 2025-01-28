@@ -51,11 +51,10 @@ fn test_extract_fingerprint() -> Result<()> {
     {
         let s = SessionDescription::default();
 
-        if let Err(err) = extract_fingerprint(&s) {
-            assert_eq!(err, Error::ErrSessionDescriptionNoFingerprint);
-        } else {
-            panic!();
-        }
+        assert_eq!(
+            extract_fingerprint(&s).expect_err("fingerprint absence must be detected"),
+            Error::ErrSessionDescriptionNoFingerprint
+        );
     }
 
     //"Invalid Fingerprint"
@@ -68,11 +67,10 @@ fn test_extract_fingerprint() -> Result<()> {
             ..Default::default()
         };
 
-        if let Err(err) = extract_fingerprint(&s) {
-            assert_eq!(err, Error::ErrSessionDescriptionInvalidFingerprint);
-        } else {
-            panic!();
-        }
+        assert_eq!(
+            extract_fingerprint(&s).expect_err("invalid fingerprint text must be detected"),
+            Error::ErrSessionDescriptionInvalidFingerprint
+        );
     }
 
     //"Conflicting Fingerprint"
@@ -92,11 +90,10 @@ fn test_extract_fingerprint() -> Result<()> {
             ..Default::default()
         };
 
-        if let Err(err) = extract_fingerprint(&s) {
-            assert_eq!(err, Error::ErrSessionDescriptionConflictingFingerprints);
-        } else {
-            panic!();
-        }
+        assert_eq!(
+            extract_fingerprint(&s).expect_err("mismatching fingerprint texts must be detected"),
+            Error::ErrSessionDescriptionConflictingFingerprints
+        );
     }
 
     Ok(())
@@ -120,11 +117,12 @@ async fn test_extract_ice_details() -> Result<()> {
             ..Default::default()
         };
 
-        if let Err(err) = extract_ice_details(&s).await {
-            assert_eq!(err, Error::ErrSessionDescriptionMissingIcePwd);
-        } else {
-            panic!();
-        }
+        assert_eq!(
+            extract_ice_details(&s)
+                .await
+                .expect_err("ICE requires password for authentication"),
+            Error::ErrSessionDescriptionMissingIcePwd
+        );
     }
 
     //"Missing ice-ufrag"
@@ -140,11 +138,12 @@ async fn test_extract_ice_details() -> Result<()> {
             ..Default::default()
         };
 
-        if let Err(err) = extract_ice_details(&s).await {
-            assert_eq!(err, Error::ErrSessionDescriptionMissingIceUfrag);
-        } else {
-            panic!();
-        }
+        assert_eq!(
+            extract_ice_details(&s)
+                .await
+                .expect_err("ICE requires 'user fragment' for authentication"),
+            Error::ErrSessionDescriptionMissingIceUfrag
+        );
     }
 
     //"ice details at session level"
@@ -216,11 +215,12 @@ async fn test_extract_ice_details() -> Result<()> {
             ..Default::default()
         };
 
-        if let Err(err) = extract_ice_details(&s).await {
-            assert_eq!(err, Error::ErrSessionDescriptionConflictingIceUfrag);
-        } else {
-            panic!();
-        }
+        assert_eq!(
+            extract_ice_details(&s)
+                .await
+                .expect_err("mismatching ICE ufrags must be detected"),
+            Error::ErrSessionDescriptionConflictingIceUfrag
+        );
     }
 
     //"Conflict pwd"
@@ -246,11 +246,57 @@ async fn test_extract_ice_details() -> Result<()> {
             ..Default::default()
         };
 
-        if let Err(err) = extract_ice_details(&s).await {
-            assert_eq!(err, Error::ErrSessionDescriptionConflictingIcePwd);
-        } else {
-            panic!();
-        }
+        assert_eq!(
+            extract_ice_details(&s)
+                .await
+                .expect_err("mismatching ICE passwords must be detected"),
+            Error::ErrSessionDescriptionConflictingIcePwd
+        );
+    }
+
+    //"Allow Conflict ufrag from inactive MediaDescription"
+    {
+        let s = SessionDescription {
+            media_descriptions: vec![
+                MediaDescription {
+                    attributes: vec![
+                        Attribute {
+                            key: "ice-ufrag".to_owned(),
+                            value: Some(DEFAULT_UFRAG.to_owned()),
+                        },
+                        Attribute {
+                            key: "ice-pwd".to_owned(),
+                            value: Some(DEFAULT_PWD.to_owned()),
+                        },
+                    ],
+                    ..Default::default()
+                },
+                MediaDescription {
+                    attributes: vec![
+                        Attribute {
+                            key: "ice-ufrag".to_owned(),
+                            value: Some("invalidUfrag".to_owned()),
+                        },
+                        Attribute {
+                            key: "ice-pwd".to_owned(),
+                            value: Some(DEFAULT_PWD.to_owned()),
+                        },
+                        Attribute {
+                            key: ATTR_KEY_INACTIVE.to_owned(),
+                            value: None,
+                        },
+                    ],
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+
+        let (ufrag, pwd, _) = extract_ice_details(&s)
+            .await
+            .expect("should allow conflicting ICE ufrag when MediaDescription is inactive");
+        assert_eq!(ufrag, DEFAULT_UFRAG);
+        assert_eq!(pwd, DEFAULT_PWD);
     }
 
     Ok(())
@@ -319,16 +365,16 @@ fn test_track_details_from_sdp() -> Result<()> {
                             value: None,
                         },
                         Attribute {
-                            key: "ssrc-group".to_owned(),
-                            value: Some("FID 3000 4000".to_owned()),
-                        },
-                        Attribute {
                             key: "ssrc".to_owned(),
                             value: Some("3000 msid:video_trk_label video_trk_guid".to_owned()),
                         },
                         Attribute {
                             key: "ssrc".to_owned(),
                             value: Some("4000 msid:rtx_trk_label rtx_trck_guid".to_owned()),
+                        },
+                        Attribute {
+                            key: "ssrc-group".to_owned(),
+                            value: Some("FID 3000 4000".to_owned()),
                         },
                     ],
                     ..Default::default()
@@ -395,6 +441,7 @@ fn test_track_details_from_sdp() -> Result<()> {
             assert_eq!(track.kind, RTPCodecType::Video);
             assert_eq!(track.ssrcs[0], 3000);
             assert_eq!(track.stream_id, "video_trk_label");
+            assert_eq!(track.repair_ssrc, 4000);
         } else {
             panic!("missing video track with ssrc:3000");
         }
@@ -535,8 +582,10 @@ async fn fingerprint_test(
     let params = PopulateSdpParams {
         media_description_fingerprint: sdpmedia_description_fingerprints,
         is_icelite: false,
+        extmap_allow_mixed: false,
         connection_role: ConnectionRole::Active,
         ice_gathering_state: RTCIceGatheringState::New,
+        match_bundle_group: None,
     };
 
     let s = populate_sdp(
@@ -567,7 +616,7 @@ async fn test_media_description_fingerprints() -> Result<()> {
     let api = APIBuilder::new().with_media_engine(m).build();
     let interceptor = api.interceptor_registry.build("")?;
 
-    let kp = KeyPair::generate(&rcgen::PKCS_ECDSA_P256_SHA256)?;
+    let kp = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)?;
     let certificate = RTCCertificate::from_key_pair(kp)?;
 
     let transport = Arc::new(RTCDtlsTransport::default());
@@ -646,10 +695,11 @@ async fn test_media_description_fingerprints() -> Result<()> {
         media[i].transceivers[0]
             .set_sender(Arc::new(
                 RTCRtpSender::new(
-                    api.setting_engine.get_receive_mtu(),
                     Some(track),
+                    RTPCodecType::Video,
                     Arc::new(RTCDtlsTransport::default()),
                     Arc::clone(&api.media_engine),
+                    Arc::clone(&api.setting_engine),
                     Arc::clone(&interceptor),
                     false,
                 )
@@ -702,8 +752,20 @@ async fn test_populate_sdp() -> Result<()> {
         )
         .await;
 
-        let mut rid_map = HashMap::new();
-        rid_map.insert("ridkey".to_owned(), "some".to_owned());
+        let rid_map = vec![
+            SimulcastRid {
+                id: "ridkey".to_owned(),
+                direction: SimulcastDirection::Recv,
+                params: "some".to_owned(),
+                paused: false,
+            },
+            SimulcastRid {
+                id: "ridpaused".to_owned(),
+                direction: SimulcastDirection::Recv,
+                params: "some2".to_owned(),
+                paused: true,
+            },
+        ];
         let media_sections = vec![MediaSection {
             id: "video".to_owned(),
             transceivers: vec![tr],
@@ -717,8 +779,10 @@ async fn test_populate_sdp() -> Result<()> {
         let params = PopulateSdpParams {
             media_description_fingerprint: se.sdp_media_level_fingerprints,
             is_icelite: se.candidates.ice_lite,
+            extmap_allow_mixed: true,
             connection_role: DEFAULT_DTLS_ROLE_OFFER.to_connection_role(),
             ice_gathering_state: RTCIceGatheringState::Complete,
+            match_bundle_group: None,
         };
         let offer_sdp = populate_sdp(
             d,
@@ -732,23 +796,33 @@ async fn test_populate_sdp() -> Result<()> {
         .await?;
 
         // Test contains rid map keys
-        let mut found = false;
+        let mut found = 0;
         for desc in &offer_sdp.media_descriptions {
             if desc.media_name.media != "video" {
                 continue;
             }
-            for a in &desc.attributes {
-                if a.key == SDP_ATTRIBUTE_RID {
-                    if let Some(value) = &a.value {
-                        if value.contains("ridkey") {
-                            found = true;
-                            break;
-                        }
-                    }
-                }
+
+            let rid_map = get_rids(desc);
+            if let Some(rid) = rid_map.iter().find(|rid| rid.id == "ridkey") {
+                assert!(!rid.paused, "Rid should be active");
+                assert_eq!(
+                    rid.direction,
+                    SimulcastDirection::Send,
+                    "Rid should be send"
+                );
+                found += 1;
+            }
+            if let Some(rid) = rid_map.iter().find(|rid| rid.id == "ridpaused") {
+                assert!(rid.paused, "Rid should be paused");
+                assert_eq!(
+                    rid.direction,
+                    SimulcastDirection::Send,
+                    "Rid should be send"
+                );
+                found += 1;
             }
         }
-        assert!(found, "Rid key should be present");
+        assert_eq!(found, 2, "All Rid key should be present");
     }
 
     //"SetCodecPreferences"
@@ -802,7 +876,7 @@ async fn test_populate_sdp() -> Result<()> {
             id: "video".to_owned(),
             transceivers: vec![tr],
             data: false,
-            rid_map: HashMap::new(),
+            rid_map: vec![],
             ..Default::default()
         }];
 
@@ -811,8 +885,10 @@ async fn test_populate_sdp() -> Result<()> {
         let params = PopulateSdpParams {
             media_description_fingerprint: se.sdp_media_level_fingerprints,
             is_icelite: se.candidates.ice_lite,
+            extmap_allow_mixed: true,
             connection_role: DEFAULT_DTLS_ROLE_OFFER.to_connection_role(),
             ice_gathering_state: RTCIceGatheringState::Complete,
+            match_bundle_group: None,
         };
         let offer_sdp = populate_sdp(
             d,
@@ -844,6 +920,388 @@ async fn test_populate_sdp() -> Result<()> {
             }
         }
         assert!(found_vp8, "vp8 should be present in sdp");
+    }
+
+    //"Bundle all"
+    {
+        let se = SettingEngine::default();
+        let mut me = MediaEngine::default();
+        me.register_default_codecs()?;
+
+        let api = APIBuilder::new().with_media_engine(me).build();
+        let interceptor = api.interceptor_registry.build("")?;
+        let transport = Arc::new(RTCDtlsTransport::default());
+        let receiver = Arc::new(api.new_rtp_receiver(
+            RTPCodecType::Video,
+            Arc::clone(&transport),
+            Arc::clone(&interceptor),
+        ));
+
+        let sender = Arc::new(
+            api.new_rtp_sender(None, Arc::clone(&transport), Arc::clone(&interceptor))
+                .await,
+        );
+
+        let tr = RTCRtpTransceiver::new(
+            receiver,
+            sender,
+            RTCRtpTransceiverDirection::Recvonly,
+            RTPCodecType::Video,
+            api.media_engine.video_codecs.clone(),
+            Arc::clone(&api.media_engine),
+            None,
+        )
+        .await;
+
+        let media_sections = vec![MediaSection {
+            id: "video".to_owned(),
+            transceivers: vec![tr],
+            data: false,
+            rid_map: vec![],
+            ..Default::default()
+        }];
+
+        let d = SessionDescription::default();
+
+        let params = PopulateSdpParams {
+            media_description_fingerprint: se.sdp_media_level_fingerprints,
+            is_icelite: se.candidates.ice_lite,
+            extmap_allow_mixed: true,
+            connection_role: DEFAULT_DTLS_ROLE_OFFER.to_connection_role(),
+            ice_gathering_state: RTCIceGatheringState::Complete,
+            match_bundle_group: None,
+        };
+        let offer_sdp = populate_sdp(
+            d,
+            &[],
+            &api.media_engine,
+            &[],
+            &RTCIceParameters::default(),
+            &media_sections,
+            params,
+        )
+        .await?;
+
+        assert_eq!(
+            offer_sdp.attribute(ATTR_KEY_GROUP),
+            Some(&"BUNDLE video".to_owned())
+        );
+
+        assert!(offer_sdp.has_attribute(ATTR_KEY_EXTMAP_ALLOW_MIXED));
+    }
+
+    //"Bundle matched"
+    {
+        let se = SettingEngine::default();
+        let mut me = MediaEngine::default();
+        me.register_default_codecs()?;
+
+        let api = APIBuilder::new().with_media_engine(me).build();
+        let interceptor = api.interceptor_registry.build("")?;
+        let transport = Arc::new(RTCDtlsTransport::default());
+
+        let video_receiver = Arc::new(api.new_rtp_receiver(
+            RTPCodecType::Video,
+            Arc::clone(&transport),
+            Arc::clone(&interceptor),
+        ));
+        let audio_receiver = Arc::new(api.new_rtp_receiver(
+            RTPCodecType::Audio,
+            Arc::clone(&transport),
+            Arc::clone(&interceptor),
+        ));
+
+        let video_sender = Arc::new(
+            api.new_rtp_sender(None, Arc::clone(&transport), Arc::clone(&interceptor))
+                .await,
+        );
+        let audio_sender = Arc::new(
+            api.new_rtp_sender(None, Arc::clone(&transport), Arc::clone(&interceptor))
+                .await,
+        );
+
+        let trv = RTCRtpTransceiver::new(
+            video_receiver,
+            video_sender,
+            RTCRtpTransceiverDirection::Recvonly,
+            RTPCodecType::Video,
+            api.media_engine.video_codecs.clone(),
+            Arc::clone(&api.media_engine),
+            None,
+        )
+        .await;
+
+        let tra = RTCRtpTransceiver::new(
+            audio_receiver,
+            audio_sender,
+            RTCRtpTransceiverDirection::Recvonly,
+            RTPCodecType::Audio,
+            api.media_engine.audio_codecs.clone(),
+            Arc::clone(&api.media_engine),
+            None,
+        )
+        .await;
+
+        let media_sections = vec![
+            MediaSection {
+                id: "video".to_owned(),
+                transceivers: vec![trv],
+                data: false,
+                rid_map: vec![],
+                ..Default::default()
+            },
+            MediaSection {
+                id: "audio".to_owned(),
+                transceivers: vec![tra],
+                data: false,
+                rid_map: vec![],
+                ..Default::default()
+            },
+        ];
+
+        let d = SessionDescription::default();
+
+        let params = PopulateSdpParams {
+            media_description_fingerprint: se.sdp_media_level_fingerprints,
+            is_icelite: se.candidates.ice_lite,
+            extmap_allow_mixed: true,
+            connection_role: DEFAULT_DTLS_ROLE_OFFER.to_connection_role(),
+            ice_gathering_state: RTCIceGatheringState::Complete,
+            match_bundle_group: Some("audio".to_owned()),
+        };
+        let offer_sdp = populate_sdp(
+            d,
+            &[],
+            &api.media_engine,
+            &[],
+            &RTCIceParameters::default(),
+            &media_sections,
+            params,
+        )
+        .await?;
+
+        assert_eq!(
+            offer_sdp.attribute(ATTR_KEY_GROUP),
+            Some(&"BUNDLE audio".to_owned())
+        );
+    }
+
+    //"empty bundle group"
+    {
+        let se = SettingEngine::default();
+        let mut me = MediaEngine::default();
+        me.register_default_codecs()?;
+
+        let api = APIBuilder::new().with_media_engine(me).build();
+        let interceptor = api.interceptor_registry.build("")?;
+        let transport = Arc::new(RTCDtlsTransport::default());
+        let receiver = Arc::new(api.new_rtp_receiver(
+            RTPCodecType::Video,
+            Arc::clone(&transport),
+            Arc::clone(&interceptor),
+        ));
+
+        let sender = Arc::new(
+            api.new_rtp_sender(None, Arc::clone(&transport), Arc::clone(&interceptor))
+                .await,
+        );
+
+        let tr = RTCRtpTransceiver::new(
+            receiver,
+            sender,
+            RTCRtpTransceiverDirection::Recvonly,
+            RTPCodecType::Video,
+            api.media_engine.video_codecs.clone(),
+            Arc::clone(&api.media_engine),
+            None,
+        )
+        .await;
+
+        let media_sections = vec![MediaSection {
+            id: "video".to_owned(),
+            transceivers: vec![tr],
+            data: false,
+            rid_map: vec![],
+            ..Default::default()
+        }];
+
+        let d = SessionDescription::default();
+
+        let params = PopulateSdpParams {
+            media_description_fingerprint: se.sdp_media_level_fingerprints,
+            is_icelite: se.candidates.ice_lite,
+            extmap_allow_mixed: true,
+            connection_role: DEFAULT_DTLS_ROLE_OFFER.to_connection_role(),
+            ice_gathering_state: RTCIceGatheringState::Complete,
+            match_bundle_group: Some("".to_owned()),
+        };
+        let offer_sdp = populate_sdp(
+            d,
+            &[],
+            &api.media_engine,
+            &[],
+            &RTCIceParameters::default(),
+            &media_sections,
+            params,
+        )
+        .await?;
+
+        assert_eq!(offer_sdp.attribute(ATTR_KEY_GROUP), None);
+    }
+
+    // "Sender RTX"
+    {
+        let mut se = SettingEngine::default();
+        se.enable_sender_rtx(true);
+
+        let mut me = MediaEngine::default();
+        me.register_default_codecs()?;
+
+        me.register_codec(
+            RTCRtpCodecParameters {
+                capability: RTCRtpCodecCapability {
+                    mime_type: "video/rtx".to_owned(),
+                    clock_rate: 90000,
+                    channels: 0,
+                    sdp_fmtp_line: "apt=96".to_string(),
+                    rtcp_feedback: vec![],
+                },
+                payload_type: 97,
+                ..Default::default()
+            },
+            RTPCodecType::Video,
+        )?;
+
+        me.push_codecs(me.video_codecs.clone(), RTPCodecType::Video)
+            .await;
+
+        let api = APIBuilder::new()
+            .with_media_engine(me)
+            .with_setting_engine(se.clone())
+            .build();
+        let interceptor = api.interceptor_registry.build("")?;
+        let transport = Arc::new(RTCDtlsTransport::default());
+        let receiver = Arc::new(api.new_rtp_receiver(
+            RTPCodecType::Video,
+            Arc::clone(&transport),
+            Arc::clone(&interceptor),
+        ));
+
+        let codec = RTCRtpCodecCapability {
+            mime_type: "video/vp8".to_owned(),
+            ..Default::default()
+        };
+
+        let track = Arc::new(TrackLocalStaticSample::new_with_rid(
+            codec.clone(),
+            "video".to_owned(),
+            "f".to_owned(),
+            "webrtc-rs".to_owned(),
+        ));
+
+        let sender = Arc::new(
+            api.new_rtp_sender(
+                Some(track),
+                Arc::clone(&transport),
+                Arc::clone(&interceptor),
+            )
+            .await,
+        );
+
+        sender
+            .add_encoding(Arc::new(TrackLocalStaticSample::new_with_rid(
+                codec.clone(),
+                "video".to_owned(),
+                "h".to_owned(),
+                "webrtc-rs".to_owned(),
+            )))
+            .await?;
+
+        let tr = RTCRtpTransceiver::new(
+            receiver,
+            sender,
+            RTCRtpTransceiverDirection::Sendonly,
+            RTPCodecType::Video,
+            api.media_engine.video_codecs.clone(),
+            Arc::clone(&api.media_engine),
+            None,
+        )
+        .await;
+
+        let media_sections = vec![MediaSection {
+            id: "video".to_owned(),
+            transceivers: vec![tr],
+            data: false,
+            ..Default::default()
+        }];
+
+        let d = SessionDescription::default();
+
+        let params = PopulateSdpParams {
+            media_description_fingerprint: se.sdp_media_level_fingerprints,
+            is_icelite: se.candidates.ice_lite,
+            extmap_allow_mixed: true,
+            connection_role: DEFAULT_DTLS_ROLE_OFFER.to_connection_role(),
+            ice_gathering_state: RTCIceGatheringState::Complete,
+            match_bundle_group: None,
+        };
+        let offer_sdp = populate_sdp(
+            d,
+            &[],
+            &api.media_engine,
+            &[],
+            &RTCIceParameters::default(),
+            &media_sections,
+            params,
+        )
+        .await?;
+
+        // Test codecs and FID groups
+        let mut found_vp8 = false;
+        let mut found_rtx = false;
+        let mut found_ssrcs: Vec<&str> = Vec::new();
+        let mut found_fids = Vec::new();
+        for desc in &offer_sdp.media_descriptions {
+            if desc.media_name.media != "video" {
+                continue;
+            }
+            for a in &desc.attributes {
+                if a.key.contains("rtpmap") {
+                    if let Some(value) = &a.value {
+                        if value == "96 VP8/90000" {
+                            found_vp8 = true;
+                        } else if value == "97 rtx/90000" {
+                            found_rtx = true;
+                        }
+                    }
+                } else if a.key == "ssrc" {
+                    if let Some((ssrc, _)) = a.value.as_ref().and_then(|v| v.split_once(' ')) {
+                        found_ssrcs.push(ssrc);
+                    }
+                } else if a.key == "ssrc-group" {
+                    if let Some(group) = a.value.as_ref().and_then(|v| v.strip_prefix("FID ")) {
+                        let Some((a, b)) = group.split_once(" ") else {
+                            panic!("invalid FID format in sdp")
+                        };
+
+                        found_fids.extend([a, b]);
+                    }
+                }
+            }
+        }
+
+        found_fids.sort();
+
+        found_ssrcs.sort();
+        // the sdp may have multiple attributes for each ssrc
+        found_ssrcs.dedup();
+
+        assert!(found_vp8, "vp8 should be present in sdp");
+        assert!(found_rtx, "rtx should be present in sdp");
+        assert_eq!(found_ssrcs.len(), 4, "all ssrcs should be present in sdp");
+        assert_eq!(found_fids.len(), 4, "all fids should be present in sdp");
+
+        assert_eq!(found_ssrcs, found_fids);
     }
 
     Ok(())
@@ -920,14 +1378,14 @@ async fn test_populate_sdp_reject() -> Result<()> {
             id: "video".to_owned(),
             transceivers: vec![trv],
             data: false,
-            rid_map: HashMap::new(),
+            rid_map: vec![],
             ..Default::default()
         },
         MediaSection {
             id: "audio".to_owned(),
             transceivers: vec![tra],
             data: false,
-            rid_map: HashMap::new(),
+            rid_map: vec![],
             ..Default::default()
         },
     ];
@@ -937,8 +1395,10 @@ async fn test_populate_sdp_reject() -> Result<()> {
     let params = PopulateSdpParams {
         media_description_fingerprint: se.sdp_media_level_fingerprints,
         is_icelite: se.candidates.ice_lite,
+        extmap_allow_mixed: true,
         connection_role: DEFAULT_DTLS_ROLE_OFFER.to_connection_role(),
         ice_gathering_state: RTCIceGatheringState::Complete,
+        match_bundle_group: None,
     };
     let offer_sdp = populate_sdp(
         d,
@@ -1006,7 +1466,8 @@ fn test_get_rids() {
 
     assert!(!rids.is_empty(), "Rid mapping should be present");
 
-    assert!(rids.get("f").is_some(), "rid values should contain 'f'");
+    let f = rids.iter().find(|rid| rid.id == "f");
+    assert!(f.is_some(), "rid values should contain 'f'");
 }
 
 #[test]

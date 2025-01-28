@@ -7,12 +7,13 @@ pub mod sctp_transport_state;
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use arc_swap::ArcSwapOption;
 use data::data_channel::DataChannel;
 use data::message::message_channel_open::ChannelType;
+use portable_atomic::{AtomicBool, AtomicU32, AtomicU8};
 use sctp::association::Association;
 use sctp_transport_state::RTCSctpTransportState;
 use tokio::sync::{Mutex, Notify};
@@ -243,8 +244,8 @@ impl RTCSctpTransport {
                 }
             };
 
-            let mut max_retransmits = 0;
-            let mut max_packet_lifetime = 0;
+            let mut max_retransmits = None;
+            let mut max_packet_life_time = None;
             let val = dc.config.reliability_parameter as u16;
             let ordered;
 
@@ -257,19 +258,19 @@ impl RTCSctpTransport {
                 }
                 ChannelType::PartialReliableRexmit => {
                     ordered = true;
-                    max_retransmits = val;
+                    max_retransmits = Some(val);
                 }
                 ChannelType::PartialReliableRexmitUnordered => {
                     ordered = false;
-                    max_retransmits = val;
+                    max_retransmits = Some(val);
                 }
                 ChannelType::PartialReliableTimed => {
                     ordered = true;
-                    max_packet_lifetime = val;
+                    max_packet_life_time = Some(val);
                 }
                 ChannelType::PartialReliableTimedUnordered => {
                     ordered = false;
-                    max_packet_lifetime = val;
+                    max_packet_life_time = Some(val);
                 }
             };
 
@@ -284,7 +285,7 @@ impl RTCSctpTransport {
                     protocol: dc.config.protocol.clone(),
                     negotiated,
                     ordered,
-                    max_packet_life_time: max_packet_lifetime,
+                    max_packet_life_time,
                     max_retransmits,
                 },
                 Arc::clone(&param.setting_engine),

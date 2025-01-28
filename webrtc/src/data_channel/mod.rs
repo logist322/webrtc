@@ -8,7 +8,7 @@ pub mod data_channel_state;
 
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU8, AtomicUsize, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Weak};
 use std::time::SystemTime;
 
@@ -18,6 +18,7 @@ use data::message::message_channel_open::ChannelType;
 use data_channel_message::*;
 use data_channel_parameters::*;
 use data_channel_state::RTCDataChannelState;
+use portable_atomic::{AtomicBool, AtomicU16, AtomicU8, AtomicUsize};
 use sctp::stream::OnBufferedAmountLowFn;
 use tokio::sync::{Mutex, Notify};
 use util::sync::Mutex as SyncMutex;
@@ -46,13 +47,21 @@ pub type OnCloseHdlrFn =
 /// DataChannel represents a WebRTC DataChannel
 /// The DataChannel interface represents a network channel
 /// which can be used for bidirectional peer-to-peer transfers of arbitrary data
+///
+/// ## Specifications
+///
+/// * [MDN]
+/// * [W3C]
+///
+/// [MDN]: https://developer.mozilla.org/en-US/docs/Web/API/RTCDataChannel
+/// [W3C]: https://w3c.github.io/webrtc-pc/#dom-rtcdatachannel
 #[derive(Default)]
 pub struct RTCDataChannel {
     pub(crate) stats_id: String,
     pub(crate) label: String,
     pub(crate) ordered: bool,
-    pub(crate) max_packet_lifetime: u16,
-    pub(crate) max_retransmits: u16,
+    pub(crate) max_packet_lifetime: Option<u16>,
+    pub(crate) max_retransmits: Option<u16>,
     pub(crate) protocol: String,
     pub(crate) negotiated: bool,
     pub(crate) id: AtomicU16,
@@ -128,26 +137,32 @@ impl RTCDataChannel {
             let channel_type;
             let reliability_parameter;
 
-            if self.max_packet_lifetime == 0 && self.max_retransmits == 0 {
-                reliability_parameter = 0u32;
-                if self.ordered {
-                    channel_type = ChannelType::Reliable;
-                } else {
-                    channel_type = ChannelType::ReliableUnordered;
+            match (self.max_retransmits, self.max_packet_lifetime) {
+                (None, None) => {
+                    reliability_parameter = 0u32;
+                    if self.ordered {
+                        channel_type = ChannelType::Reliable;
+                    } else {
+                        channel_type = ChannelType::ReliableUnordered;
+                    }
                 }
-            } else if self.max_retransmits != 0 {
-                reliability_parameter = self.max_retransmits as u32;
-                if self.ordered {
-                    channel_type = ChannelType::PartialReliableRexmit;
-                } else {
-                    channel_type = ChannelType::PartialReliableRexmitUnordered;
+
+                (Some(max_retransmits), _) => {
+                    reliability_parameter = max_retransmits as u32;
+                    if self.ordered {
+                        channel_type = ChannelType::PartialReliableRexmit;
+                    } else {
+                        channel_type = ChannelType::PartialReliableRexmitUnordered;
+                    }
                 }
-            } else {
-                reliability_parameter = self.max_packet_lifetime as u32;
-                if self.ordered {
-                    channel_type = ChannelType::PartialReliableTimed;
-                } else {
-                    channel_type = ChannelType::PartialReliableTimedUnordered;
+
+                (None, Some(max_packet_lifetime)) => {
+                    reliability_parameter = max_packet_lifetime as u32;
+                    if self.ordered {
+                        channel_type = ChannelType::PartialReliableTimed;
+                    } else {
+                        channel_type = ChannelType::PartialReliableTimedUnordered;
+                    }
                 }
             }
 
@@ -445,13 +460,13 @@ impl RTCDataChannel {
 
     /// max_packet_lifetime represents the length of the time window (msec) during
     /// which transmissions and retransmissions may occur in unreliable mode.
-    pub fn max_packet_lifetime(&self) -> u16 {
+    pub fn max_packet_lifetime(&self) -> Option<u16> {
         self.max_packet_lifetime
     }
 
     /// max_retransmits represents the maximum number of retransmissions that are
     /// attempted in unreliable mode.
-    pub fn max_retransmits(&self) -> u16 {
+    pub fn max_retransmits(&self) -> Option<u16> {
         self.max_retransmits
     }
 

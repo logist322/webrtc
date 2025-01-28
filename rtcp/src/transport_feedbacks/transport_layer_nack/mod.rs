@@ -102,8 +102,11 @@ const TLN_LENGTH: usize = 2;
 const NACK_OFFSET: usize = 8;
 
 // The TransportLayerNack packet informs the encoder about the loss of a transport packet
-// IETF RFC 4585, Section 6.2.1
-// https://tools.ietf.org/html/rfc4585#section-6.2.1
+/// ## Specifications
+///
+/// * [RFC 4585 §6.2.1]
+///
+/// [RFC 4585 §6.2.1]: https://tools.ietf.org/html/rfc4585#section-6.2.1
 #[derive(Debug, PartialEq, Eq, Default, Clone)]
 pub struct TransportLayerNack {
     /// SSRC of sender
@@ -151,10 +154,7 @@ impl Packet for TransportLayerNack {
     }
 
     fn equal(&self, other: &(dyn Packet + Send + Sync)) -> bool {
-        other
-            .as_any()
-            .downcast_ref::<TransportLayerNack>()
-            .map_or(false, |a| self == a)
+        other.as_any().downcast_ref::<TransportLayerNack>() == Some(self)
     }
 
     fn cloned(&self) -> Box<dyn Packet + Send + Sync> {
@@ -173,7 +173,7 @@ impl MarshalSize for TransportLayerNack {
 impl Marshal for TransportLayerNack {
     /// Marshal encodes the packet in binary.
     fn marshal_to(&self, mut buf: &mut [u8]) -> Result<usize, util::Error> {
-        if self.nacks.len() + TLN_LENGTH > std::u8::MAX as usize {
+        if self.nacks.len() + TLN_LENGTH > u8::MAX as usize {
             return Err(Error::TooManyReports.into());
         }
         if buf.remaining_mut() < self.marshal_size() {

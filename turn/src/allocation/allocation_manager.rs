@@ -20,7 +20,7 @@ pub struct ManagerConfig {
 
 /// `Manager` is used to hold active allocations.
 pub struct Manager {
-    allocations: AllocationMap,
+    allocations: Arc<Mutex<AllocationMap>>,
     reservations: Arc<Mutex<HashMap<String, u16>>>,
     relay_addr_generator: Box<dyn RelayAddressGenerator + Send + Sync>,
     alloc_close_notify: Option<mpsc::Sender<AllocationInfo>>,
@@ -63,6 +63,7 @@ impl Manager {
                     AllocationInfo::new(
                         *five_tuple,
                         alloc.username.text.clone(),
+                        alloc.relay_addr,
                         #[cfg(feature = "metrics")]
                         alloc.relayed_bytes.load(Ordering::Acquire),
                     ),
@@ -76,7 +77,7 @@ impl Manager {
     /// Fetches the [`Allocation`] matching the passed [`FiveTuple`].
     pub async fn get_allocation(&self, five_tuple: &FiveTuple) -> Option<Arc<Allocation>> {
         let allocations = self.allocations.lock().await;
-        allocations.get(five_tuple).map(Arc::clone)
+        allocations.get(five_tuple).cloned()
     }
 
     /// Creates a new [`Allocation`] and starts relaying.
@@ -107,9 +108,9 @@ impl Manager {
             relay_addr,
             five_tuple,
             username,
+            Arc::downgrade(&self.allocations),
             self.alloc_close_notify.clone(),
         );
-        a.allocations = Some(Arc::clone(&self.allocations));
 
         log::debug!("listening on relay addr: {:?}", a.relay_addr);
         a.start(lifetime).await;

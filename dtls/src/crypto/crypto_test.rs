@@ -89,7 +89,8 @@ fn test_generate_key_signature() -> Result<()> {
         NamedCurve::X25519,
         &CryptoPrivateKey {
             kind: CryptoPrivateKeyKind::Rsa256(
-                RsaKeyPair::from_der(&pem.contents).map_err(|e| Error::Other(e.to_string()))?,
+                ring::rsa::KeyPair::from_der(&pem.contents)
+                    .map_err(|e| Error::Other(e.to_string()))?,
             ),
             serialized_der: pem.contents.clone(),
         }, //hashAlgorithmSHA256,
@@ -189,7 +190,7 @@ fn test_certificate_verify() -> Result<()> {
         &certificate_ecdsa256
             .certificate
             .iter()
-            .map(|x| x.0.clone())
+            .map(|x| x.as_ref().to_owned())
             .collect::<Vec<Vec<u8>>>(),
         false,
     )?;
@@ -211,7 +212,7 @@ fn test_certificate_verify() -> Result<()> {
         &certificate_ed25519
             .certificate
             .iter()
-            .map(|x| x.0.clone())
+            .map(|x| x.as_ref().to_owned())
             .collect::<Vec<Vec<u8>>>(),
         false,
     )?;

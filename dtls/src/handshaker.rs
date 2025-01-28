@@ -13,6 +13,10 @@ use crate::error::*;
 use crate::extension::extension_use_srtp::*;
 use crate::signature_hash_algorithm::*;
 
+use rustls::client::danger::ServerCertVerifier;
+use rustls::pki_types::CertificateDer;
+use rustls::server::danger::ClientCertVerifier;
+
 //use std::io::BufWriter;
 
 // [RFC6347 Section-4.2.4]
@@ -72,7 +76,7 @@ impl fmt::Display for HandshakeState {
 }
 
 pub(crate) type VerifyPeerCertificateFn =
-    Arc<dyn (Fn(&[Vec<u8>], &[rustls::Certificate]) -> Result<()>) + Send + Sync>;
+    Arc<dyn (Fn(&[Vec<u8>], &[CertificateDer<'static>]) -> Result<()>) + Send + Sync>;
 
 pub(crate) struct HandshakeConfig {
     pub(crate) local_psk_callback: Option<PskCallback>,
@@ -88,12 +92,26 @@ pub(crate) struct HandshakeConfig {
     pub(crate) insecure_skip_verify: bool,
     pub(crate) insecure_verification: bool,
     pub(crate) verify_peer_certificate: Option<VerifyPeerCertificateFn>,
-    pub(crate) server_cert_verifier: Arc<dyn rustls::client::ServerCertVerifier>,
-    pub(crate) client_cert_verifier: Option<Arc<dyn rustls::server::ClientCertVerifier>>,
+    pub(crate) server_cert_verifier: Arc<dyn ServerCertVerifier>,
+    pub(crate) client_cert_verifier: Option<Arc<dyn ClientCertVerifier>>,
     pub(crate) retransmit_interval: tokio::time::Duration,
     pub(crate) initial_epoch: u16,
     //log           logging.LeveledLogger
     //mu sync.Mutex
+}
+
+pub fn gen_self_signed_root_cert() -> rustls::RootCertStore {
+    let mut certs = rustls::RootCertStore::empty();
+    certs
+        .add(
+            rcgen::generate_simple_self_signed(vec![])
+                .unwrap()
+                .cert
+                .der()
+                .to_owned(),
+        )
+        .unwrap();
+    certs
 }
 
 impl Default for HandshakeConfig {
@@ -112,10 +130,11 @@ impl Default for HandshakeConfig {
             insecure_skip_verify: false,
             insecure_verification: false,
             verify_peer_certificate: None,
-            server_cert_verifier: Arc::new(rustls::client::WebPkiVerifier::new(
-                rustls::RootCertStore::empty(),
-                None,
-            )),
+            server_cert_verifier: rustls::client::WebPkiServerVerifier::builder(Arc::new(
+                gen_self_signed_root_cert(),
+            ))
+            .build()
+            .unwrap(),
             client_cert_verifier: None,
             retransmit_interval: tokio::time::Duration::from_secs(0),
             initial_epoch: 0,
@@ -311,45 +330,46 @@ impl DTLSConn {
 
         loop {
             tokio::select! {
-                 done = self.handshake_rx.recv() =>{
-                    if done.is_none() {
+                 done_senders = self.handshake_rx.recv() =>{
+                    if done_senders.is_none() {
                         trace!("[handshake:{}] {} handshake_tx is dropped", srv_cli_str(self.state.is_client), self.current_flight.to_string());
                         return Err(Error::ErrAlertFatalOrClose);
-                    }
+                    } else if let Some((rendezvous_tx, done_tx)) = done_senders {
+                        rendezvous_tx.send(()).ok();
+                        //trace!("[handshake:{}] {} received handshake_rx", srv_cli_str(self.state.is_client), self.current_flight.to_string());
+                        let result = self.current_flight.parse(&mut self.handle_queue_tx, &mut self.state, &self.cache, &self.cfg).await;
+                        drop(done_tx);
+                        match result {
+                            Err((alert, mut err)) => {
+                                trace!("[handshake:{}] {} result alert:{:?}, err:{:?}",
+                                        srv_cli_str(self.state.is_client),
+                                        self.current_flight.to_string(),
+                                        alert,
+                                        err);
 
-                    //trace!("[handshake:{}] {} received handshake_rx", srv_cli_str(self.state.is_client), self.current_flight.to_string());
-                    let result = self.current_flight.parse(&mut self.handle_queue_tx, &mut self.state, &self.cache, &self.cfg).await;
-                    drop(done);
-                    match result {
-                        Err((alert, mut err)) => {
-                            trace!("[handshake:{}] {} result alert:{:?}, err:{:?}",
-                                    srv_cli_str(self.state.is_client),
-                                    self.current_flight.to_string(),
-                                    alert,
-                                    err);
+                                if let Some(alert) = alert {
+                                    let alert_err = self.notify(alert.alert_level, alert.alert_description).await;
 
-                            if let Some(alert) = alert {
-                                let alert_err = self.notify(alert.alert_level, alert.alert_description).await;
-
-                                if let Err(alert_err) = alert_err {
-                                    if err.is_some() {
-                                        err = Some(alert_err);
+                                    if let Err(alert_err) = alert_err {
+                                        if err.is_some() {
+                                            err = Some(alert_err);
+                                        }
                                     }
                                 }
+                                if let Some(err) = err {
+                                    return Err(err);
+                                }
                             }
-                            if let Some(err) = err {
-                                return Err(err);
+                            Ok(next_flight) => {
+                                trace!("[handshake:{}] {} -> {}", srv_cli_str(self.state.is_client), self.current_flight.to_string(), next_flight.to_string());
+                                if next_flight.is_last_recv_flight() && self.current_flight.to_string() == next_flight.to_string() {
+                                    return Ok(HandshakeState::Finished);
+                                }
+                                self.current_flight = next_flight;
+                                return Ok(HandshakeState::Preparing);
                             }
-                        }
-                        Ok(next_flight) => {
-                            trace!("[handshake:{}] {} -> {}", srv_cli_str(self.state.is_client), self.current_flight.to_string(), next_flight.to_string());
-                            if next_flight.is_last_recv_flight() && self.current_flight.to_string() == next_flight.to_string() {
-                                return Ok(HandshakeState::Finished);
-                            }
-                            self.current_flight = next_flight;
-                            return Ok(HandshakeState::Preparing);
-                        }
-                    };
+                        };
+                    }
                 }
 
                 _ = retransmit_timer.as_mut() =>{

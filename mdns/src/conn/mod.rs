@@ -22,7 +22,7 @@ mod conn_test;
 
 pub const DEFAULT_DEST_ADDR: &str = "224.0.0.251:5353";
 
-const INBOUND_BUFFER_SIZE: usize = 512;
+const INBOUND_BUFFER_SIZE: usize = 65535;
 const DEFAULT_QUERY_INTERVAL: Duration = Duration::from_secs(1);
 const MAX_MESSAGE_RECORDS: usize = 3;
 const RESPONSE_TTL: u32 = 120;
@@ -350,6 +350,9 @@ async fn run(
             }
         }
     }
+
+    // There might be more than MAX_MESSAGE_RECORDS questions, so skip the rest
+    let _ = p.skip_all_questions();
 
     for _ in 0..=MAX_MESSAGE_RECORDS {
         let a = match p.answer_header() {

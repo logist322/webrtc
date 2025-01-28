@@ -1,6 +1,7 @@
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::Ordering;
 
+use portable_atomic::{AtomicBool, AtomicUsize};
 use tokio::sync::{Mutex, Semaphore};
 use util::sync::RwLock;
 
@@ -165,16 +166,16 @@ impl PendingQueue {
         if self.selected.load(Ordering::SeqCst) {
             if self.unordered_is_selected.load(Ordering::SeqCst) {
                 let unordered_queue = self.unordered_queue.read();
-                return unordered_queue.get(0).cloned();
+                return unordered_queue.front().cloned();
             } else {
                 let ordered_queue = self.ordered_queue.read();
-                return ordered_queue.get(0).cloned();
+                return ordered_queue.front().cloned();
             }
         }
 
         let c = {
             let unordered_queue = self.unordered_queue.read();
-            unordered_queue.get(0).cloned()
+            unordered_queue.front().cloned()
         };
 
         if c.is_some() {
@@ -182,7 +183,7 @@ impl PendingQueue {
         }
 
         let ordered_queue = self.ordered_queue.read();
-        ordered_queue.get(0).cloned()
+        ordered_queue.front().cloned()
     }
 
     pub(crate) fn pop(

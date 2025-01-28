@@ -72,7 +72,7 @@ impl From<u8> for TTLorHopLimitType {
     fn from(v: u8) -> Self {
         match v {
             1 => TTLorHopLimitType::IPv4,
-            2 => TTLorHopLimitType::IPv4,
+            2 => TTLorHopLimitType::IPv6,
             _ => TTLorHopLimitType::Missing,
         }
     }
@@ -132,7 +132,7 @@ impl Packet for StatisticsSummaryReportBlock {
         other
             .as_any()
             .downcast_ref::<StatisticsSummaryReportBlock>()
-            .map_or(false, |a| self == a)
+            == Some(self)
     }
     fn cloned(&self) -> Box<dyn Packet + Send + Sync> {
         Box::new(self.clone())

@@ -1,9 +1,9 @@
 use std::net::{IpAddr, Ipv4Addr};
 use std::result::Result;
 use std::str::FromStr;
-use std::sync::atomic::AtomicU64;
 
 use async_trait::async_trait;
+use portable_atomic::AtomicU64;
 use util::vnet::chunk::Chunk;
 use util::vnet::router::Nic;
 use util::vnet::*;
@@ -40,6 +40,9 @@ impl Conn for MockConn {
     }
     async fn close(&self) -> Result<(), util::Error> {
         Ok(())
+    }
+    fn as_any(&self) -> &(dyn std::any::Any + Send + Sync) {
+        self
     }
 }
 
@@ -999,7 +1002,7 @@ async fn test_write_use_valid_pair() -> Result<(), Error> {
     log::debug!("controlled_agent start_connectivity_checks done...");
 
     let test_message = "Test Message";
-    let mut read_buf = vec![0u8; test_message.as_bytes().len()];
+    let mut read_buf = vec![0u8; test_message.len()];
     controlled_agent_conn.recv(&mut read_buf).await?;
 
     assert_eq!(read_buf, test_message.as_bytes(), "should match");

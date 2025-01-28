@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::pin::Pin;
-use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::SystemTime;
 
@@ -26,6 +26,7 @@ use agent_config::*;
 use agent_internal::*;
 use agent_stats::*;
 use mdns::conn::*;
+use portable_atomic::{AtomicU8, AtomicUsize};
 use stun::agent::*;
 use stun::attributes::*;
 use stun::fingerprint::*;
@@ -103,6 +104,7 @@ pub struct Agent {
 
     pub(crate) udp_network: UDPNetwork,
     pub(crate) interface_filter: Arc<Option<InterfaceFilterFn>>,
+    pub(crate) include_loopback: bool,
     pub(crate) ip_filter: Arc<Option<IpFilterFn>>,
     pub(crate) mdns_mode: MulticastDnsMode,
     pub(crate) mdns_name: String,
@@ -199,6 +201,7 @@ impl Agent {
             udp_network: config.udp_network,
             internal: Arc::new(ai),
             interface_filter: Arc::clone(&config.interface_filter),
+            include_loopback: config.include_loopback,
             ip_filter: Arc::clone(&config.ip_filter),
             mdns_mode,
             mdns_name,
@@ -346,6 +349,8 @@ impl Agent {
             udp_mux.remove_conn_by_ufrag(&ufrag).await;
         }
 
+        Self::close_multicast_conn(&self.mdns_conn).await;
+
         //FIXME: deadlock here
         self.internal.close().await
     }
@@ -464,6 +469,7 @@ impl Agent {
             agent_internal: Arc::clone(&self.internal),
             gathering_state: Arc::clone(&self.gathering_state),
             chan_candidate_tx: Arc::clone(&self.internal.chan_candidate_tx),
+            include_loopback: self.include_loopback,
         };
         tokio::spawn(async move {
             Self::gather_candidates_internal(params).await;

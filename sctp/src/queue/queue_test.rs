@@ -261,7 +261,7 @@ fn test_pending_base_queue_push_and_pop() -> Result<()> {
 fn test_pending_base_queue_out_of_bounce() -> Result<()> {
     let mut pq = PendingBaseQueue::new();
     assert!(pq.pop_front().is_none(), "should be none");
-    assert!(pq.get(0).is_none(), "should be none");
+    assert!(pq.front().is_none(), "should be none");
 
     pq.push_back(make_data_chunk(0, false, NO_FRAGMENT));
     assert!(pq.get(1).is_none(), "should be none");
@@ -442,8 +442,9 @@ async fn test_pending_queue_append() -> Result<()> {
 ///////////////////////////////////////////////////////////////////
 //reassembly_queue_test
 ///////////////////////////////////////////////////////////////////
-use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
+
+use portable_atomic::AtomicUsize;
 
 use super::reassembly_queue::*;
 

@@ -4,11 +4,12 @@ mod net_test;
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::str::FromStr;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use ipnet::IpNet;
+use portable_atomic::AtomicU64;
 use tokio::net::UdpSocket;
 use tokio::sync::Mutex;
 
@@ -444,10 +445,7 @@ impl Net {
 
             Net::VNet(Arc::new(Mutex::new(vnet)))
         } else {
-            let interfaces = match ifaces::ifaces() {
-                Ok(ifs) => ifs,
-                Err(_) => vec![],
-            };
+            let interfaces = ifaces::ifaces().unwrap_or_default();
 
             let mut m: HashMap<String, Vec<IpNet>> = HashMap::new();
             for iface in interfaces {

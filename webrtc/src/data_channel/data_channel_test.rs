@@ -202,11 +202,15 @@ async fn test_data_channel_send_before_signaling() -> Result<()> {
             return Box::pin(async {});
         }
         Box::pin(async move {
-            let d2 = Arc::clone(&d);
+            let d2 = Arc::downgrade(&d);
             d.on_message(Box::new(move |_: DataChannelMessage| {
-                let d3 = Arc::clone(&d2);
+                let d3 = d2.clone();
                 Box::pin(async move {
-                    let result = d3.send(&Bytes::from(b"Pong".to_vec())).await;
+                    let result = d3
+                        .upgrade()
+                        .unwrap()
+                        .send(&Bytes::from(b"Pong".to_vec()))
+                        .await;
                     assert!(result.is_ok(), "Failed to send string on data channel");
                 })
             }));
@@ -218,11 +222,11 @@ async fn test_data_channel_send_before_signaling() -> Result<()> {
 
     assert!(dc.ordered(), "Ordered should be set to true");
 
-    let dc2 = Arc::clone(&dc);
+    let dc2 = Arc::downgrade(&dc);
     dc.on_open(Box::new(move || {
-        let dc3 = Arc::clone(&dc2);
+        let dc3 = dc2.clone();
         Box::pin(async move {
-            let result = dc3.send_text("Ping".to_owned()).await;
+            let result = dc3.upgrade().unwrap().send_text("Ping".to_owned()).await;
             assert!(result.is_ok(), "Failed to send string on data channel");
         })
     }));
@@ -258,12 +262,16 @@ async fn test_data_channel_send_after_connected() -> Result<()> {
             return Box::pin(async {});
         }
         Box::pin(async move {
-            let d2 = Arc::clone(&d);
+            let d2 = Arc::downgrade(&d);
             d.on_message(Box::new(move |_: DataChannelMessage| {
-                let d3 = Arc::clone(&d2);
+                let d3 = d2.clone();
 
                 Box::pin(async move {
-                    let result = d3.send(&Bytes::from(b"Pong".to_vec())).await;
+                    let result = d3
+                        .upgrade()
+                        .unwrap()
+                        .send(&Bytes::from(b"Pong".to_vec()))
+                        .await;
                     assert!(result.is_ok(), "Failed to send string on data channel");
                 })
             }));
@@ -377,7 +385,7 @@ async fn test_data_channel_parameters_max_packet_life_time_exchange() -> Result<
     );
     assert_eq!(
         dc.max_packet_lifetime(),
-        max_packet_life_time,
+        Some(max_packet_life_time),
         "should match"
     );
 
@@ -394,7 +402,7 @@ async fn test_data_channel_parameters_max_packet_life_time_exchange() -> Result<
         );
         assert_eq!(
             d.max_packet_lifetime(),
-            max_packet_life_time,
+            Some(max_packet_life_time),
             "should match"
         );
         let done_tx2 = Arc::clone(&done_tx);
@@ -428,7 +436,7 @@ async fn test_data_channel_parameters_max_retransmits_exchange() -> Result<()> {
 
     // Check if parameters are correctly set
     assert!(!dc.ordered(), "Ordered should be set to false");
-    assert_eq!(dc.max_retransmits(), max_retransmits, "should match");
+    assert_eq!(dc.max_retransmits(), Some(max_retransmits), "should match");
 
     let done_tx = Arc::new(Mutex::new(Some(done_tx)));
     answer_pc.on_data_channel(Box::new(move |d: Arc<RTCDataChannel>| {
@@ -440,7 +448,7 @@ async fn test_data_channel_parameters_max_retransmits_exchange() -> Result<()> {
 
         // Check if parameters are correctly set
         assert!(!d.ordered(), "Ordered should be set to false");
-        assert_eq!(max_retransmits, d.max_retransmits(), "should match");
+        assert_eq!(Some(max_retransmits), d.max_retransmits(), "should match");
         let done_tx2 = Arc::clone(&done_tx);
         Box::pin(async move {
             let mut done = done_tx2.lock().await;
@@ -453,6 +461,107 @@ async fn test_data_channel_parameters_max_retransmits_exchange() -> Result<()> {
     Ok(())
 }
 
+#[tokio::test]
+async fn test_data_channel_parameters_unreliable_unordered_exchange() -> Result<()> {
+    let mut m = MediaEngine::default();
+    m.register_default_codecs()?;
+    let api = APIBuilder::new().with_media_engine(m).build();
+
+    let ordered = false;
+    let max_retransmits = Some(0);
+    let max_packet_life_time = None;
+    let options = RTCDataChannelInit {
+        ordered: Some(ordered),
+        max_retransmits,
+        max_packet_life_time,
+        ..Default::default()
+    };
+
+    let (mut offer_pc, mut answer_pc, dc, done_tx, done_rx) =
+        set_up_data_channel_parameters_test(&api, Some(options)).await?;
+
+    // Check if parameters are correctly set
+    assert_eq!(
+        dc.ordered(),
+        ordered,
+        "Ordered should be same value as set in DataChannelInit"
+    );
+    assert_eq!(dc.max_retransmits, max_retransmits, "should match");
+
+    let done_tx = Arc::new(Mutex::new(Some(done_tx)));
+    answer_pc.on_data_channel(Box::new(move |d: Arc<RTCDataChannel>| {
+        if d.label() != EXPECTED_LABEL {
+            return Box::pin(async {});
+        }
+        // Check if parameters are correctly set
+        assert_eq!(
+            d.ordered(),
+            ordered,
+            "Ordered should be same value as set in DataChannelInit"
+        );
+        assert_eq!(d.max_retransmits(), max_retransmits, "should match");
+        let done_tx2 = Arc::clone(&done_tx);
+        Box::pin(async move {
+            let mut done = done_tx2.lock().await;
+            done.take();
+        })
+    }));
+
+    close_reliability_param_test(&mut offer_pc, &mut answer_pc, done_rx).await?;
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_data_channel_parameters_reliable_unordered_exchange() -> Result<()> {
+    let mut m = MediaEngine::default();
+    m.register_default_codecs()?;
+    let api = APIBuilder::new().with_media_engine(m).build();
+
+    let ordered = false;
+    let max_retransmits = None;
+    let max_packet_life_time = None;
+    let options = RTCDataChannelInit {
+        ordered: Some(ordered),
+        max_retransmits,
+        max_packet_life_time,
+        ..Default::default()
+    };
+
+    let (mut offer_pc, mut answer_pc, dc, done_tx, done_rx) =
+        set_up_data_channel_parameters_test(&api, Some(options)).await?;
+
+    // Check if parameters are correctly set
+    assert_eq!(
+        dc.ordered(),
+        ordered,
+        "Ordered should be same value as set in DataChannelInit"
+    );
+    assert_eq!(dc.max_retransmits, max_retransmits, "should match");
+
+    let done_tx = Arc::new(Mutex::new(Some(done_tx)));
+    answer_pc.on_data_channel(Box::new(move |d: Arc<RTCDataChannel>| {
+        if d.label() != EXPECTED_LABEL {
+            return Box::pin(async {});
+        }
+        // Check if parameters are correctly set
+        assert_eq!(
+            d.ordered(),
+            ordered,
+            "Ordered should be same value as set in DataChannelInit"
+        );
+        assert_eq!(d.max_retransmits(), max_retransmits, "should match");
+        let done_tx2 = Arc::clone(&done_tx);
+        Box::pin(async move {
+            let mut done = done_tx2.lock().await;
+            done.take();
+        })
+    }));
+
+    close_reliability_param_test(&mut offer_pc, &mut answer_pc, done_rx).await?;
+
+    Ok(())
+}
 #[tokio::test]
 async fn test_data_channel_parameters_protocol_exchange() -> Result<()> {
     let mut m = MediaEngine::default();
@@ -743,7 +852,7 @@ async fn test_data_channel_parameters_go() -> Result<()> {
         // Check if parameters are correctly set
         assert!(dc.ordered(), "Ordered should be set to true");
         assert_eq!(
-            max_packet_life_time,
+            Some(max_packet_life_time),
             dc.max_packet_lifetime(),
             "should match"
         );
@@ -759,7 +868,7 @@ async fn test_data_channel_parameters_go() -> Result<()> {
             // Check if parameters are correctly set
             assert!(d.ordered, "Ordered should be set to true");
             assert_eq!(
-                max_packet_life_time,
+                Some(max_packet_life_time),
                 d.max_packet_lifetime(),
                 "should match"
             );

@@ -4,12 +4,13 @@ mod conn_test;
 use std::io::{BufReader, BufWriter};
 use std::marker::{Send, Sync};
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use log::*;
-use tokio::sync::{mpsc, Mutex};
+use portable_atomic::{AtomicBool, AtomicU16};
+use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio::time::Duration;
 use util::replay_detector::*;
 use util::Conn;
@@ -63,7 +64,8 @@ struct ConnReaderContext {
     cache: HandshakeCache,
     cipher_suite: Arc<Mutex<Option<Box<dyn CipherSuite + Send + Sync>>>>,
     remote_epoch: Arc<AtomicU16>,
-    handshake_tx: mpsc::Sender<mpsc::Sender<()>>,
+    // use additional oneshot sender to mimic rendezvous channel behavior
+    handshake_tx: mpsc::Sender<(oneshot::Sender<()>, mpsc::Sender<()>)>,
     handshake_done_rx: mpsc::Receiver<()>,
     packet_tx: Arc<mpsc::Sender<PacketSendRequest>>,
 }
@@ -95,7 +97,8 @@ pub struct DTLSConn {
     pub(crate) flights: Option<Vec<Packet>>,
     pub(crate) cfg: HandshakeConfig,
     pub(crate) retransmit: bool,
-    pub(crate) handshake_rx: mpsc::Receiver<mpsc::Sender<()>>,
+    // use additional oneshot sender to mimic rendezvous channel behavior
+    pub(crate) handshake_rx: mpsc::Receiver<(oneshot::Sender<()>, mpsc::Sender<()>)>,
 
     pub(crate) packet_tx: Arc<mpsc::Sender<PacketSendRequest>>,
     pub(crate) handle_queue_tx: mpsc::Sender<mpsc::Sender<()>>,
@@ -138,6 +141,10 @@ impl Conn for DTLSConn {
     }
     async fn close(&self) -> UtilResult<()> {
         self.close().await.map_err(util::Error::from_std)
+    }
+
+    fn as_any(&self) -> &(dyn std::any::Any + Send + Sync) {
+        self
     }
 }
 
@@ -195,8 +202,8 @@ impl DTLSConn {
             if let Some(remote_addr) = conn.remote_addr() {
                 server_name = remote_addr.ip().to_string();
             } else {
-                log::warn!("conn.remote_addr is empty, please set explicitly server_name in Config! Use default \"localhost\" as server_name now");
-                server_name = "localhost".to_owned();
+                warn!("conn.remote_addr is empty, please set explicitly server_name in Config! Use default \"localhost\" as server_name now");
+                "localhost".clone_into(&mut server_name);
             }
         }
 
@@ -216,16 +223,33 @@ impl DTLSConn {
             client_cert_verifier: if config.client_auth as u8
                 >= ClientAuthType::VerifyClientCertIfGiven as u8
             {
-                Some(Arc::new(rustls::server::AllowAnyAuthenticatedClient::new(
-                    config.client_cas,
-                )))
+                Some(
+                    rustls::server::WebPkiClientVerifier::builder(Arc::new(config.client_cas))
+                        .allow_unauthenticated()
+                        .build()
+                        .unwrap_or(
+                            rustls::server::WebPkiClientVerifier::builder(Arc::new(
+                                gen_self_signed_root_cert(),
+                            ))
+                            .allow_unauthenticated()
+                            .build()
+                            .unwrap(),
+                        ),
+                )
             } else {
                 None
             },
-            server_cert_verifier: Arc::new(rustls::client::WebPkiVerifier::new(
+            server_cert_verifier: rustls::client::WebPkiServerVerifier::builder(Arc::new(
                 config.roots_cas,
-                None,
-            )),
+            ))
+            .build()
+            .unwrap_or(
+                rustls::client::WebPkiServerVerifier::builder(
+                    Arc::new(gen_self_signed_root_cert()),
+                )
+                .build()
+                .unwrap(),
+            ),
             retransmit_interval,
             //log: logger,
             initial_epoch: 0,
@@ -469,9 +493,11 @@ impl DTLSConn {
 
     // Close closes the connection.
     pub async fn close(&self) -> Result<()> {
-        if !self.closed.load(Ordering::SeqCst) {
-            self.closed.store(true, Ordering::SeqCst);
-
+        if self
+            .closed
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+        {
             // Discard error from notify() to return non-error on the first user call of Close()
             // even if the underlying connection is already closed.
             self.notify(AlertLevel::Warning, AlertDescription::CloseNotify)
@@ -806,9 +832,13 @@ impl DTLSConn {
 
         if has_handshake {
             let (done_tx, mut done_rx) = mpsc::channel(1);
-
+            let rendezvous_at_handshake = async {
+                let (rendezvous_tx, rendezvous_rx) = oneshot::channel();
+                _ = ctx.handshake_tx.send((rendezvous_tx, done_tx)).await;
+                rendezvous_rx.await
+            };
             tokio::select! {
-                _ = ctx.handshake_tx.send(done_tx) => {
+                _ = rendezvous_at_handshake => {
                     let mut wait_done_rx = true;
                     while wait_done_rx{
                         tokio::select!{

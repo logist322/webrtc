@@ -6,15 +6,16 @@ mod association_stats;
 
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, AtomicUsize, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::SystemTime;
 
 use association_internal::*;
 use association_stats::*;
 use bytes::{Bytes, BytesMut};
+use portable_atomic::{AtomicBool, AtomicU32, AtomicU8, AtomicUsize};
 use rand::random;
-use tokio::sync::{broadcast, mpsc, Mutex, Semaphore};
+use tokio::sync::{broadcast, mpsc, Mutex};
 use util::Conn;
 
 use crate::chunk::chunk_abort::ChunkAbort;
@@ -319,85 +320,62 @@ impl Association {
         };
         init.set_supported_extensions();
 
-        let name1 = name.clone();
-        let name2 = name.clone();
-
-        let bytes_received1 = Arc::clone(&bytes_received);
-        let bytes_sent2 = Arc::clone(&bytes_sent);
-
-        let net_conn1 = Arc::clone(&net_conn);
-        let net_conn2 = Arc::clone(&net_conn);
-
         let association_internal = Arc::new(Mutex::new(ai));
-        let association_internal1 = Arc::clone(&association_internal);
-        let association_internal2 = Arc::clone(&association_internal);
-
         {
-            let association_internal3 = Arc::clone(&association_internal);
-
+            let weak = Arc::downgrade(&association_internal);
             let mut ai = association_internal.lock().await;
             ai.t1init = Some(RtxTimer::new(
-                Arc::downgrade(&association_internal3),
+                weak.clone(),
                 RtxTimerId::T1Init,
                 MAX_INIT_RETRANS,
             ));
             ai.t1cookie = Some(RtxTimer::new(
-                Arc::downgrade(&association_internal3),
+                weak.clone(),
                 RtxTimerId::T1Cookie,
                 MAX_INIT_RETRANS,
             ));
             ai.t2shutdown = Some(RtxTimer::new(
-                Arc::downgrade(&association_internal3),
+                weak.clone(),
                 RtxTimerId::T2Shutdown,
                 NO_MAX_RETRANS,
             )); // retransmit forever
             ai.t3rtx = Some(RtxTimer::new(
-                Arc::downgrade(&association_internal3),
+                weak.clone(),
                 RtxTimerId::T3RTX,
                 NO_MAX_RETRANS,
             )); // retransmit forever
             ai.treconfig = Some(RtxTimer::new(
-                Arc::downgrade(&association_internal3),
+                weak.clone(),
                 RtxTimerId::Reconfig,
                 NO_MAX_RETRANS,
             )); // retransmit forever
-            ai.ack_timer = Some(AckTimer::new(
-                Arc::downgrade(&association_internal3),
-                ACK_INTERVAL,
-            ));
-        }
+            ai.ack_timer = Some(AckTimer::new(weak, ACK_INTERVAL));
 
-        tokio::spawn(async move {
-            Association::read_loop(
-                name1,
-                bytes_received1,
-                net_conn1,
+            tokio::spawn(Association::read_loop(
+                name.clone(),
+                Arc::clone(&bytes_received),
+                Arc::clone(&net_conn),
                 close_loop_ch_rx1,
-                association_internal1,
-            )
-            .await;
-        });
+                Arc::clone(&association_internal),
+            ));
 
-        tokio::spawn(async move {
-            Association::write_loop(
-                name2,
-                bytes_sent2,
-                net_conn2,
+            tokio::spawn(Association::write_loop(
+                name.clone(),
+                Arc::clone(&bytes_sent),
+                Arc::clone(&net_conn),
                 close_loop_ch_rx2,
-                association_internal2,
+                Arc::clone(&association_internal),
                 awake_write_loop_ch_rx,
-            )
-            .await;
-        });
+            ));
 
-        if is_client {
-            let mut ai = association_internal.lock().await;
-            ai.set_state(AssociationState::CookieWait);
-            ai.stored_init = Some(init);
-            ai.send_init()?;
-            let rto = ai.rto_mgr.get_rto();
-            if let Some(t1init) = &ai.t1init {
-                t1init.start(rto).await;
+            if is_client {
+                ai.set_state(AssociationState::CookieWait);
+                ai.stored_init = Some(init);
+                ai.send_init()?;
+                let rto = ai.rto_mgr.get_rto();
+                if let Some(t1init) = &ai.t1init {
+                    t1init.start(rto).await;
+                }
             }
         }
 
@@ -487,19 +465,7 @@ impl Association {
         let done = Arc::new(AtomicBool::new(false));
         let name = Arc::new(name);
 
-        let limit = {
-            #[cfg(test)]
-            {
-                1
-            }
-            #[cfg(not(test))]
-            {
-                8
-            }
-        };
-
-        let sem = Arc::new(Semaphore::new(limit));
-        while !done.load(Ordering::Relaxed) {
+        'outer: while !done.load(Ordering::Relaxed) {
             //log::debug!("[{}] gather_outbound begin", name);
             let (packets, continue_loop) = {
                 let mut ai = association_internal.lock().await;
@@ -507,23 +473,24 @@ impl Association {
             };
             //log::debug!("[{}] gather_outbound done with {}", name, packets.len());
 
-            // We schedule a new task here for a reason:
-            // If we don't tokio tends to run the write_loop and read_loop of one connection on the same OS thread
-            // This means that even though we release the lock above, the read_loop isn't able to take it, simply because it is not being scheduled by tokio
-            // Doing it this way, tokio schedules this to a new thread, this future is suspended, and the read_loop can make progress
             let net_conn = Arc::clone(&net_conn);
             let bytes_sent = Arc::clone(&bytes_sent);
             let name2 = Arc::clone(&name);
             let done2 = Arc::clone(&done);
-            let sem = Arc::clone(&sem);
-            sem.acquire().await.unwrap().forget();
-            tokio::task::spawn(async move {
-                let mut buf = BytesMut::with_capacity(16 * 1024);
-                for raw in packets {
-                    buf.clear();
-                    if let Err(err) = raw.marshal_to(&mut buf) {
-                        log::warn!("[{}] failed to serialize a packet: {:?}", name2, err);
-                    } else {
+            let mut buffer = None;
+            for raw in packets {
+                let mut buf = buffer
+                    .take()
+                    .unwrap_or_else(|| BytesMut::with_capacity(16 * 1024));
+
+                // We do the marshalling work in a blocking task here for a reason:
+                // If we don't tokio tends to run the write_loop and read_loop of one connection on the same OS thread
+                // This means that even though we release the lock above, the read_loop isn't able to take it, simply because it is not being scheduled by tokio
+                // Doing it this way, tokio schedules this work on a dedicated blocking thread, this future is suspended, and the read_loop can make progress
+                match tokio::task::spawn_blocking(move || raw.marshal_to(&mut buf).map(|_| buf))
+                    .await
+                {
+                    Ok(Ok(mut buf)) => {
                         let raw = buf.as_ref();
                         if let Err(err) = net_conn.send(raw.as_ref()).await {
                             log::warn!("[{}] failed to write packets on net_conn: {}", name2, err);
@@ -531,11 +498,29 @@ impl Association {
                         } else {
                             bytes_sent.fetch_add(raw.len(), Ordering::SeqCst);
                         }
+
+                        // Reuse allocation. Have to use options, since spawn blocking can't borrow, has to take ownership.
+                        buf.clear();
+                        buffer = Some(buf);
                     }
-                    //log::debug!("[{}] sending {} bytes done", name, raw.len());
+                    Ok(Err(err)) => {
+                        log::warn!("[{}] failed to serialize a packet: {:?}", name2, err);
+                    }
+                    Err(err) => {
+                        if err.is_cancelled() {
+                            log::debug!(
+                                "[{}] task cancelled while serializing a packet: {:?}",
+                                name,
+                                err
+                            );
+                            break 'outer;
+                        } else {
+                            log::error!("[{}] panic while serializing a packet: {:?}", name, err);
+                        }
+                    }
                 }
-                sem.add_permits(1);
-            });
+                //log::debug!("[{}] sending {} bytes done", name, raw.len());
+            }
 
             if !continue_loop {
                 break;
